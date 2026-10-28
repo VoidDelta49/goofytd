@@ -82,6 +82,24 @@ defineCow({
   blastRadius: 2.6, firstWave: 6, weight: 2,
 });
 
+// Surprise-only cows (weight 0: never in a wave mix; surprises.js spawns them).
+
+defineCow({
+  id: 'golden', name: 'Cash Cow', hp: 40, speed: 5.2, bounty: 0, damage: 2, radius: 0.5, scale: 0.95, color: 0xffc933,
+  weight: 0,
+});
+
+defineCow({
+  // radius > cell/2 gives no herd offset, so she walks cell centres and never clips towers.
+  id: 'bessie', name: 'Big Bessie', hp: 400, speed: 1.6, bounty: 60, damage: 40, radius: 1.1, scale: 2.5, color: 0xd9a066,
+  weight: 0,
+});
+
+defineCow({
+  id: 'calf', name: 'Calf', hp: 6, speed: 4.5, bounty: 1, damage: 1, radius: 0.35, scale: 0.5, color: 0xffffff,
+  weight: 0,
+});
+
 /**
  * Live cows, densely packed in slots 0..count-1. Removing a cow moves the
  * last cow into its slot, so iteration never skips holes. Nothing outside

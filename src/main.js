@@ -16,11 +16,17 @@ import { PauseMenu } from './client/menu.js';
 import { UpgradeMenu } from './client/upgrade-menu.js';
 
 const canvas = document.getElementById('game');
-const mapName = new URLSearchParams(location.search).get('map');
+const params = new URLSearchParams(location.search);
+const mapName = params.get('map');
+// A fresh seed every run (and every restart), so the cow mix and the surprises differ each time.
+// ?seed=N pins it, to replay a run. The sim stays deterministic for a given seed (PvP will share one).
+const fixedSeed = params.has('seed') ? Number(params.get('seed')) >>> 0 : null;
+const newSeed = () => fixedSeed ?? crypto.getRandomValues(new Uint32Array(1))[0];
 const level = LEVELS[Object.hasOwn(LEVELS, mapName) ? mapName : DEFAULT_LEVEL]();
 const world = levelCollision(level);
 const cfg = defaultMoveConfig();
 const gameCfg = defaultGameConfig();
+gameCfg.seed = newSeed();
 // The first wave always waits for the START WAVE button (or N) so there's time to
 // build. Later waves follow the level: automatic on the field, manual in the playground.
 gameCfg.firstWave = null;
@@ -102,6 +108,7 @@ function buyUpgrade(formId) {
 
 /** Start over: wipe the run and put the player back at the start. Used by TRY AGAIN and the pause menu. */
 function restartGame() {
+  game.cfg.seed = newSeed();
   game.reset();
   build.cancel();
   upgrades.close();
@@ -214,6 +221,7 @@ function frame(now) {
     td.consume(game.events); // tick() clears its events, so collect them every tick
     sfx.consume(game.events);
     for (const e of game.events) {
+      if (e.kind === 'surprise') say(e.text, 3500);
       if (e.kind === 'boom' && e.wrecked) say(`KABOOM! A Kaboom Cow blew up ${e.wrecked === 1 ? 'a tower' : `${e.wrecked} towers`}`, 2500);
     }
   }

@@ -26,7 +26,9 @@ const run = (g, seconds) => until(g, seconds, () => false);
 
 test('cows: wave mix starts plain and adds a new type every few waves', () => {
   assert(waveMix(1).length === 1 && waveMix(2).length === 1 && waveMix(1)[0].type === COW_TYPES.cow, 'early waves not plain');
-  assert(waveMix(6).length === COW_TYPE_LIST.length, 'wave 6 should have every type');
+  // Weight-0 types (Cash Cow, Big Bessie, Calf) are surprise-only and never in a mix.
+  const waveTypes = COW_TYPE_LIST.filter((t) => t.weight > 0).length;
+  assert(waveTypes === 5 && waveMix(6).length === waveTypes, 'wave 6 should have every wave type');
   assert(cowDebuts(1).length === 0, 'wave 1 announces the plain cow');
   const debuted = [3, 4, 5, 6].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
   assert(debuted === 'big,boomer,fast,flying', `debuts: ${debuted}`);
@@ -44,7 +46,8 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
 });
 
 test('cows: spawners use the mix (wave 1 plain, wave 7 everything) with per-wave HP', () => {
-  const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9 });
+  // Surprises off: this checks the wave formula alone (surprises.test.js covers them).
+  const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9, surprises: false });
   const seen = [];
   const spawn = g.spawnCow.bind(g);
   g.spawnCow = (type, x, z, hp) => { seen.push({ wave: g.wave, id: type.id, hp }); return spawn(type, x, z, hp); };
@@ -52,7 +55,7 @@ test('cows: spawners use the mix (wave 1 plain, wave 7 everything) with per-wave
   const w1 = seen.filter((s) => s.wave === 1);
   assert(w1.length === 40 && w1.every((s) => s.id === 'cow' && s.hp === COW_TYPES.cow.hp), 'wave 1 not 40 plain cows');
   const w7 = new Set(seen.filter((s) => s.wave === 7).map((s) => s.id));
-  assert(w7.size === COW_TYPE_LIST.length, `wave 7 types: ${[...w7]}`);
+  assert(w7.size === COW_TYPE_LIST.filter((t) => t.weight > 0).length, `wave 7 types: ${[...w7]}`);
   const big7 = seen.find((s) => s.wave === 7 && s.id === 'big');
   assert(Math.abs(big7.hp - COW_TYPES.big.hp * (1 + 0.15 * 6)) < 1e-9, `big cow hp ${big7.hp}`);
 });

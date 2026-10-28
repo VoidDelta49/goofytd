@@ -6,9 +6,10 @@
 import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
-import { CowPool, COW_TYPE_LIST, waveMix, pickFromMix } from './cows.js';
+import { CowPool, COW_TYPES, COW_TYPE_LIST, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, TOWER_TYPES, TOWER_FORMS } from './towers.js';
 import { mulberry32 } from './rng.js';
+import { SURPRISES, surpriseChance, pickSurprise } from './surprises.js';
 
 export const CELL = 2;
 
@@ -28,6 +29,17 @@ export function defaultGameConfig() {
     spawnInterval: 0.5,
     spawnSpread: 4,
     waveBonus: 25,
+    /** Scripted surprises rolled on top of the wave formula (surprises.js). */
+    surprises: true,
+    /** Chance of a surprise in wave 2, growing per wave up to surpriseMax. */
+    surpriseBase: 0.3,
+    surpriseGrowth: 0.05,
+    surpriseMax: 0.75,
+    /** After this many waves in a row without one, the next wave always gets one. */
+    surpriseDrought: 2,
+    /** From this wave on, a wave that rolled a surprise may roll a second one. */
+    doubleSurpriseWave: 8,
+    doubleSurpriseChance: 0.25,
     maxCows: 4096,
   };
 }
@@ -100,6 +112,19 @@ export class Game {
     this.time = 0;
     this.nextWaveIn = this.cfg.firstWave;
     for (const s of this.spawners) { s.queue = 0; s.timer = 0; }
+    // Surprises draw from their own stream so rolling one never shifts which cows the wave brings.
+    this.surpriseRng = mulberry32((this.cfg.seed ^ 0x5eed5eed) >>> 0);
+    /** Running surprise scripts (see updateSurprises). */
+    this.runs = [];
+    /** Cow id -> { onKill, onEscape } for cows a surprise is watching. */
+    this.tracked = new Map();
+    this.wavesWithoutSurprise = 0;
+    this.lastSurprise = null;
+    /** Every surprise rolled this match: { wave, id }. */
+    this.surpriseLog = [];
+    /** Regular wave spawns pause while spawnHold > 0, and their interval is × spawnRate (a surprise can change both). */
+    this.spawnHold = 0;
+    this.spawnRate = 1;
   }
 
   // ---- waves and spawning -------------------------------------------------
@@ -114,23 +139,157 @@ export class Game {
     });
     this.money += this.cfg.waveBonus;
     this.nextWaveIn = null;
+    this.spawnHold = 0;
+    this.spawnRate = 1;
+    if (this.cfg.surprises) this.rollSurprises();
     this.events.push({ kind: 'wave', wave: this.wave });
   }
 
-  get spawning() { return this.spawners.some((s) => s.queue > 0); }
+  get spawning() { return this.runs.length > 0 || this.spawners.some((s) => s.queue > 0); }
+
+  // ---- surprises ----------------------------------------------------------
+
+  /**
+   * Maybe schedule surprises for the wave that just started. Only schedules:
+   * nothing happens (and no event is pushed) until updateSurprises runs them
+   * inside tick(), since tick() clears events and startWave can run outside it.
+   */
+  rollSurprises() {
+    const r = this.surpriseRng, cfg = this.cfg;
+    const due = this.wave >= 2 && this.wavesWithoutSurprise >= cfg.surpriseDrought;
+    let n = due || r() < surpriseChance(cfg, this.wave) ? 1 : 0;
+    if (n && this.wave >= cfg.doubleSurpriseWave && r() < cfg.doubleSurpriseChance) n = 2;
+    const picked = this.lastSurprise ? [this.lastSurprise] : [];
+    let scheduled = 0;
+    for (let k = 0; k < n; k++) {
+      const def = pickSurprise(this.wave, r(), picked);
+      if (!def) break;
+      picked.push(def.id);
+      const [d0, d1] = def.delay;
+      this.queueSurprise(def, d0 + (d1 - d0) * r());
+      scheduled++;
+    }
+    this.wavesWithoutSurprise = scheduled ? 0 : this.wavesWithoutSurprise + 1;
+  }
+
+  /**
+   * Run surprise `def` (a def or its id) `delay` seconds from now, at the current
+   * wave's strength. Also handy from the console: goofytd.game.queueSurprise('bessie').
+   */
+  queueSurprise(def, delay = 0) {
+    if (typeof def === 'string') def = SURPRISES[def];
+    if (!def) return false;
+    const steps = def.script({ wave: Math.max(1, this.wave), rng: this.surpriseRng, game: this })
+      .map((s, order) => ({ ...s, order })).sort((a, b) => a.at - b.at || a.order - b.order);
+    this.runs.push({ def, t: -delay, steps, next: 0, streams: [], at: null });
+    this.surpriseLog.push({ wave: this.wave, id: def.id });
+    this.lastSurprise = def.id;
+    return true;
+  }
+
+  /** Banner text from a surprise (or anything else in the sim that wants one). Only inside tick(). */
+  announce(id, text, x, z) {
+    this.events.push({ kind: 'surprise', id, text, x, z });
+  }
+
+  /** Where a surprise's cows come from: a spawner, every spawner, or a reachable spot near the field edge. */
+  surprisePoints(from, run) {
+    const r = this.surpriseRng;
+    if (from === 'all') return this.spawners.map((s) => ({ x: s.x, z: s.z }));
+    if (from === 'same' && run.at) return [run.at];
+    if (from === 'flank') {
+      const p = this.flankPoint();
+      if (p) return [p];
+    }
+    const s = this.spawners[Math.floor(r() * this.spawners.length)];
+    return [{ x: s.x, z: s.z }];
+  }
+
+  /** A walkable cell within 3 cells of the grid edge, far from the milk and the spawners, with a path to the milk. */
+  flankPoint() {
+    const { grid } = this, r = this.surpriseRng;
+    for (let tries = 0; tries < 60; tries++) {
+      const side = Math.floor(r() * 4), depth = Math.floor(r() * 3);
+      const along = Math.floor(r() * (side < 2 ? grid.w : grid.h));
+      const cx = side === 0 ? along : side === 1 ? along : side === 2 ? depth : grid.w - 1 - depth;
+      const cz = side === 0 ? depth : side === 1 ? grid.h - 1 - depth : along;
+      if (!grid.inBounds(cx, cz)) continue;
+      const i = grid.index(cx, cz);
+      if (!grid.walkable(i) || grid.goal[i] || !(grid.dist[i] < Infinity)) continue;
+      const x = grid.centerX(i), z = grid.centerZ(i);
+      if ((x - this.milkX) ** 2 + (z - this.milkZ) ** 2 < 30 * 30) continue;
+      if (this.spawners.some((s) => (x - s.x) ** 2 + (z - s.z) ** 2 < 15 * 15)) continue;
+      return { x, z };
+    }
+    return null;
+  }
+
+  updateSurprises(dt) {
+    const hpScale = 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1);
+    for (let k = this.runs.length - 1; k >= 0; k--) {
+      const run = this.runs[k];
+      run.t += dt;
+      while (run.next < run.steps.length && run.steps[run.next].at <= run.t) {
+        const step = run.steps[run.next++];
+        if (step.say) this.announce(run.def.id, step.say);
+        if (step.call) step.call(this);
+        if (step.spawn) {
+          const pts = this.surprisePoints(step.from ?? 'random', run);
+          run.at = pts[0];
+          if (step.announce) this.announce(run.def.id, step.announce, pts[0].x, pts[0].z);
+          for (const p of pts) {
+            run.streams.push({ step, x: p.x, z: p.z, left: step.count ?? 1, timer: 0 });
+          }
+        }
+      }
+      for (let j = run.streams.length - 1; j >= 0; j--) {
+        const st = run.streams[j], step = st.step;
+        st.timer -= dt;
+        while (st.timer <= 0 && st.left > 0) {
+          st.timer += step.every ?? 0.15;
+          st.left--;
+          const mix = step.mix ? waveMix(this.wave) : null;
+          const type = mix ? pickFromMix(mix, this.surpriseRng()) : COW_TYPES[step.spawn];
+          const i = this.spawnCow(type, st.x, st.z, type.hp * hpScale * (step.hp ?? 1), this.surpriseRng);
+          if (i >= 0 && (step.onKill || step.onEscape)) {
+            this.tracked.set(this.cows.id[i], { onKill: step.onKill, onEscape: step.onEscape });
+          }
+        }
+        if (st.left <= 0) run.streams.splice(j, 1);
+      }
+      if (run.next >= run.steps.length && run.streams.length === 0) this.runs.splice(k, 1);
+    }
+  }
+
+  /** Run kill/escape hooks for watched cows. Called at the end of tick() so it sees every kill this tick. */
+  watchTracked() {
+    if (this.tracked.size === 0) return;
+    const n = this.events.length; // hooks may push events; only look at the ones already there
+    for (let e = 0; e < n; e++) {
+      const ev = this.events[e];
+      if (ev.kind !== 'kill' && ev.kind !== 'drink') continue;
+      const w = this.tracked.get(ev.id);
+      if (!w) continue;
+      this.tracked.delete(ev.id);
+      const hook = ev.kind === 'kill' ? w.onKill : w.onEscape;
+      if (hook) hook(this, ev.id);
+    }
+  }
 
   updateSpawners(dt) {
     if (this.nextWaveIn !== null) {
       this.nextWaveIn -= dt;
       if (this.nextWaveIn <= 0) this.startWave();
     }
+    this.updateSurprises(dt);
+    if (this.spawnHold > 0) this.spawnHold -= dt;
     const mix = waveMix(this.wave);
     const hpScale = 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1);
     for (const s of this.spawners) {
-      if (s.queue <= 0) continue;
+      if (s.queue <= 0 || this.spawnHold > 0) continue;
       s.timer -= dt;
       while (s.timer <= 0 && s.queue > 0) {
-        s.timer += this.cfg.spawnInterval;
+        s.timer += this.cfg.spawnInterval * this.spawnRate;
         s.queue--;
         // A one-type mix draws no random number, so early waves match the old sequence.
         const type = mix.length === 1 ? mix[0].type : pickFromMix(mix, this.rng());
@@ -143,14 +302,15 @@ export class Game {
     }
   }
 
-  spawnCow(type, x, z, hp = type.hp) {
+  /** `rng`: surprises pass their own stream, so their cows don't shift the regular wave's draws. */
+  spawnCow(type, x, z, hp = type.hp, rng = this.rng) {
     const spread = this.cfg.spawnSpread;
-    let sx = x + (this.rng() - 0.5) * spread, sz = z + (this.rng() - 0.5) * spread;
+    let sx = x + (rng() - 0.5) * spread, sz = z + (rng() - 0.5) * spread;
     const cell = this.grid.cellAt(sx, sz);
     if (cell < 0 || !this.grid.walkable(cell)) { sx = x; sz = z; }
     // Herd spread inside a cell, narrower for wide cows so they don't clip the towers beside the path.
     const off = Math.min(0.6 * this.grid.cell, Math.max(0, this.grid.cell - 2 * type.radius));
-    const i = this.cows.spawn(type, sx, sz, (this.rng() - 0.5) * off, (this.rng() - 0.5) * off);
+    const i = this.cows.spawn(type, sx, sz, (rng() - 0.5) * off, (rng() - 0.5) * off);
     if (i >= 0) this.cows.hp[i] = hp;
     return i;
   }
@@ -166,6 +326,7 @@ export class Game {
     this.updateTowers(dt);
     this.updateProjectiles(dt);
     this.updateZones(dt);
+    this.watchTracked();
   }
 
   updateCows(dt) {
@@ -181,7 +342,7 @@ export class Game {
       const cell = grid.cellAt(x, z);
       if (cell >= 0 && grid.goal[cell]) {
         this.milk -= type.damage;
-        this.events.push({ kind: 'drink', x, z });
+        this.events.push({ kind: 'drink', x, z, id: cows.id[i] });
         cows.remove(i);
         continue;
       }
@@ -372,7 +533,7 @@ export class Game {
     this.money += type.bounty;
     this.kills++;
     if (tower) tower.kills++;
-    this.events.push({ kind: 'kill', x: cows.x[i], z: cows.z[i] });
+    this.events.push({ kind: 'kill', x: cows.x[i], z: cows.z[i], id: cows.id[i] });
     cows.remove(i);
     return true;
   }

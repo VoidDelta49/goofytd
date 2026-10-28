@@ -423,6 +423,8 @@ export class Sfx {
         case 'drink': this.play('drink', e.x, e.z); break;
         case 'boom': this.play('boom', e.x, e.z); break;
         case 'wave': this.play('wave'); break;
+        // Positioned when the surprise has a place (an ambush), so you can hear which way to look.
+        case 'surprise': this.play('wave', e.x, e.z); break;
         case 'lost': this.play('lost'); break;
       }
     }
