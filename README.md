@@ -34,7 +34,9 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Fullscreen on interaction | `Input.onGesture` listens (capture phase, on `window`) for mouse down, touch/pen up and key down, and requests fullscreen from that very gesture; skips Esc, F and the ⛶ button so they can still leave it. On by default; `?fs=0` opts out (stored). Touch also locks landscape where allowed | Browsers only grant fullscreen from a user gesture, and it also confines the cursor (Firefox needed that). Chrome counts mouse *down* but touch *up* as the activating event, hence both. |
 | First wave | `main.js` sets `firstWave = null`: wave 1 starts only from the START WAVE 1 button or N. Later waves stay automatic on the field, manual in the playground | Lets you build before the cows come, without a countdown. The button is a DOM element, shown while `game.wave === 0`. |
 | Sound | `src/client/audio.js`: every effect is synthesised with Web Audio when it plays (oscillators, filtered noise, envelopes), no sample files. Sim events (`shot`, `launch`, `splash`, `kill`, `drink`, `wave`, `lost`) map to sounds; UI sounds play where the click happens. Distance gain `(1 − d/70)²`, stereo pan from the view direction, per-sound throttle and overlap caps, 28 voices total, compressor on the master | No assets to download or license; thousands of cows and 40 towers would otherwise fire hundreds of sounds a second. Created on the first gesture (browsers lock audio until then). Events pushed outside `tick()` (hand-started waves, builds) are cleared by the next tick, so those sounds are triggered directly. |
-| Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
+| Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle. Every button carries a word, not a letter; BUILD / SELL relabel themselves from the game state (`touchButtonState`, unit-tested) | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. The old corner row of `S− S+ HOP R ⛶ N ♪` was unreadable, so rarely-used settings moved into the pause menu and only play actions stay on screen. |
+| Pause | `main.js` `setPaused`: the frame loop skips `player.step`/`game.tick` and doesn't feed the `FixedClock` (no fast-forward on resume); rendering continues behind the DOM menu (`src/client/menu.js`). P toggles it, the mouse is released while paused, and `Input.paused` makes game keys ignored. RESTART GAME needs two taps within 3 s | Gives phones a place for settings and a way to stop. The mouse has to be free to click the menu. The sim is untouched, so determinism isn't affected. |
+| Touch button taps | `setPointerCapture` is wrapped in try/catch in `touch.js` | It throws `InvalidStateError` for a pointer that is already gone (a very quick tap) and, running before the action, silently dropped the tap. Capture only matters for drags. |
 
 | Cow pathing | One shared flow field on a 2 m nav grid (`src/sim/navgrid.js`): Dijkstra outward from the cells around the milk, 8-way with no corner cutting, rebuilt only when a tower is built or sold | Cost is per grid, not per cow: 2000 cows tick in ~0.4 ms; a rebuild of the 100×100 field is ~2 ms. Towers can maze the cows, and the same field answers "how far is this cow from the milk" for targeting. |
 | Tower placement | Towers snap to the nav grid (odd footprints centre on a cell, even on a corner). Refused on level geometry, other towers, cows, the player, the field edge, too little money, or if any spawner or cow would lose every path to the milk | Mazing is the fun part of TD, sealing the milk off would break it. The path check is a yes/no BFS (~1.5 ms with 2000 cows), and the build preview reruns it only when the aim, grid or money changes, or every 120 ms. |
@@ -77,7 +79,8 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | Q or right click | Stop building |
 | X | Sell the tower you're looking at (70% back) |
 | N | Start wave 1 (it never starts on its own, so you can build first), or the next wave now (the playground only has manual waves) |
-| Enter | Restart after the cows drink all the milk |
+| Enter | Restart after the cows drink all the milk (the **TRY AGAIN** button does the same) |
+| P | Pause / resume (also releases the mouse; click RESUME or press P to carry on) |
 
 If the browser refuses mouse capture (for example inside a sandboxed embed), a notice appears and you look by holding the left button and dragging instead.
 
@@ -87,14 +90,14 @@ Touch (phones and tablets; appears on the first tap):
 |---|---|
 | Left part of the screen | Floating move stick (put your thumb down anywhere there) |
 | Drag on the right part | Look |
-| JUMP | Jump; hold with auto-hop on to keep hopping; keep dragging the same thumb to steer |
-| DUCK | Crouch toggle |
-| S− / S+ | Look sensitivity (degrees per pixel, saved in the browser) |
-| HOP, R, ⛶ | Auto-hop toggle, respawn, fullscreen (also locks landscape where the browser allows) |
-| BUILD | Cycle the tower to build (then off) |
-| PLACE | Build the ghost, or sell the tower you're looking at when not building |
-| N | Start the next wave now |
-| ♪ | Mute / unmute sound |
+| **JUMP** | Jump; hold with auto-hop on to keep hopping; keep dragging the same thumb to steer |
+| **CROUCH** | Crouch on/off (tap to switch; it says ON while active) |
+| Tower bar (bottom) | Tap a tower to pick it; tap it again to stop building |
+| **BUILD** | Build the ghost tower where you aim. Gold = ready, red = not allowed, dim = no tower picked (tapping it says what to do) |
+| **SELL** | Sell the tower you're looking at; shows the refund, dim when you aren't looking at one |
+| **▶▶ NEXT WAVE** | Start the next wave now (hidden before wave 1, which has its own START WAVE 1 button) |
+| **❚❚ PAUSE** | Freeze the game and open the menu: Resume, Sound, Auto-hop, Look speed − / +, Fullscreen, Respawn, Restart game (asks twice) |
+| **TRY AGAIN** | Appears when the milk is gone; starts a fresh run |
 
 The **START WAVE 1** button (bottom centre, shown until the first wave begins, and again after a restart) does the same as N; clicking it also captures the mouse.
 
@@ -110,7 +113,7 @@ node tests/run.js        # or: npm test
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
-They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation), and tower defence: spawners reach the milk on every level, cows walk the flow field and drink, waves start and grow, losing, grid snapping, every placement refusal, mazing without sealing the milk, cows never walking through towers, towers being solid for the player and selling, the sell raycast, squirter kills and bounties, mortar splash/lead/min range, a custom tower type plugging in, same-seed determinism, a 2000-cow / 40-tower benchmark (prints ms per tick), and sound: positioning and panning, every synthesised sound building a valid graph (a fake context that throws on what browsers throw on), throttling, muting and event mapping.
+They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, the touch button labels (BUILD / SELL / NEXT WAVE states) and the pause menu (labels, two-tap restart), and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation), and tower defence: spawners reach the milk on every level, cows walk the flow field and drink, waves start and grow, losing, grid snapping, every placement refusal, mazing without sealing the milk, cows never walking through towers, towers being solid for the player and selling, the sell raycast, squirter kills and bounties, mortar splash/lead/min range, a custom tower type plugging in, same-seed determinism, a 2000-cow / 40-tower benchmark (prints ms per tick), and sound: positioning and panning, every synthesised sound building a valid graph (a fake context that throws on what browsers throw on), throttling, muting and event mapping.
 
 ## Movement model
 
@@ -163,7 +166,8 @@ src/client/             browser-only
   render.js             three.js scene, world-UV box meshes, grid texture, lights
   look.js               mouse-delta filter (spikes, Firefox echoes)/accumulator, view quaternion (pure, tested)
   input.js              pointer lock + drag-look fallback, keyboard, bindings, settings
-  touch.js              touch stick, drag-look and buttons
+  touch.js              touch stick, drag-look, labelled buttons (`touchButtonState`)
+  menu.js               PauseMenu: DOM overlay with labelled settings buttons
   build.js              build mode: crosshair -> ground point, placement preview, sell target
   td-render.js          instanced cows, tower models from `parts`, ghost, tracers, shells, puffs
   audio.js              procedural sound effects (Web Audio), positioning, throttling

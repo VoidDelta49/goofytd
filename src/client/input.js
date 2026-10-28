@@ -36,6 +36,7 @@ export const BINDINGS = {
   nextWave: ['KeyN'],
   restart: ['Enter'],
   mute: ['KeyM'],
+  pause: ['KeyP'],
 };
 
 /** Actions forwarded to `Input.handlers` (set by main.js) on key down. */
@@ -117,8 +118,10 @@ export class Input {
     this.lockPending = false;
     this.refusals = 0;
     this.lastUnlockAt = -Infinity;
-    /** Game actions (building, waves, sound) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, mute, selectTower(n), cycleTower }. */
+    /** Game actions (building, waves, sound) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, mute, pause, selectTower(n) }. */
     this.handlers = {};
+    /** Set by main.js while the game is paused: game keys are ignored, P still resumes. */
+    this.paused = false;
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
@@ -232,7 +235,7 @@ export class Input {
     if (e.type === 'pointerup' && e.pointerType === 'mouse') return;
     if (e.type === 'keydown' && (e.code === 'Escape' || BINDINGS.fullscreen.includes(e.code))) return;
     // The fullscreen button and F key are the ways out; don't undo them.
-    if (e.target?.closest?.('[data-touch=fullscreen]')) return;
+    if (e.target?.closest?.('[data-menu=fullscreen]')) return;
     this.enterFullscreen();
   }
 
@@ -287,6 +290,23 @@ export class Input {
     if (e.deltaY !== 0) this.player.pending.jumpPressed = true;
   }
 
+  /** Look speed up (+1) or down (−1) for whichever input is in use: finger drag on touch, mouse otherwise. */
+  adjustSensitivity(dir) {
+    if (this.touch.enabled) {
+      this.adjustTouchSensitivity(dir * 0.05);
+    } else {
+      this.settings.sensitivity = Math.round(clamp(this.settings.sensitivity + dir * 0.1, ...SENS_RANGE) * 10) / 10;
+      saveSettings(this.settings);
+    }
+  }
+
+  /** Current look speed as text for the pause menu. */
+  get sensLabel() {
+    return this.touch.enabled
+      ? `${this.settings.touchSensitivity.toFixed(2)}°/px`
+      : this.settings.sensitivity.toFixed(1);
+  }
+
   adjustTouchSensitivity(delta) {
     this.settings.touchSensitivity = Math.round(clamp(this.settings.touchSensitivity + delta, ...TOUCH_SENS_RANGE) * 100) / 100;
     saveSettings(this.settings);
@@ -301,6 +321,13 @@ export class Input {
       this.down.clear();
       return;
     }
+    // P pauses while playing and resumes while paused (the mouse is released then, so not `active`).
+    if (isDown && !e.repeat && is('pause') && (this.active || this.paused)) {
+      e.preventDefault();
+      this.handlers.pause?.();
+      return;
+    }
+    if (this.paused && isDown) return; // paused: no building, jumping or respawning behind the menu
     if (!this.active) {
       if (isDown && is('respawn')) this.player.pending.respawn = true;
       if (isDown && is('restart')) this.handlers.restart?.();

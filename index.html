@@ -47,8 +47,9 @@
     #hud [data-hud=hint] b { font-size: 26px; }
     #hud .td {
       position: absolute; right: calc(14px + env(safe-area-inset-right)); top: calc(10px + env(safe-area-inset-top));
-      text-align: right; white-space: pre;
+      text-align: right;
     }
+    #hud [data-hud=td] { white-space: pre; }
     #hud .milk { width: 220px; height: 12px; margin-left: auto; border: 2px solid #fffc; border-radius: 7px; background: #0005; overflow: hidden; }
     #hud [data-hud=milkbar] { height: 100%; width: 100%; background: #f6f6ff; transition: width 0.2s; }
     #hud [data-hud=place] {
@@ -59,7 +60,10 @@
       position: absolute; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%);
       display: flex; gap: 8px; white-space: nowrap;
     }
-    #hud [data-hud=buildbar] .slot { padding: 3px 9px; border-radius: 6px; background: #0006; border: 2px solid transparent; }
+    #hud [data-hud=buildbar] .slot {
+      padding: 3px 9px; border-radius: 6px; background: #0006; border: 2px solid transparent;
+      pointer-events: auto; cursor: pointer;
+    }
     #hud [data-hud=buildbar] .slot.on { border-color: #ffd84d; background: #0009; }
     #hud [data-hud=buildbar] .slot.poor .cost { color: #ff8a8a; }
     #hud [data-hud=buildbar] .cost { color: #ffd84d; }
@@ -69,17 +73,18 @@
     }
     #hud [data-hud=banner]:empty, #hud [data-hud=place]:empty { display: none; }
     /* First-wave button: waves don't start until you say so, so you can build first. */
-    #hud [data-hud=startwave] {
+    #hud [data-hud=startwave], #hud [data-hud=restart] {
       position: absolute; left: 50%; bottom: calc(64px + env(safe-area-inset-bottom)); transform: translateX(-50%);
       pointer-events: auto; cursor: pointer; touch-action: none; white-space: nowrap;
       padding: 10px 24px; border-radius: 12px; border: 3px solid #ffd84d; background: #000b; color: #ffd84d;
       font: 700 20px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-shadow: none;
       animation: startpulse 1.4s ease-in-out infinite;
     }
-    #hud [data-hud=startwave][hidden] { display: none; }
-    #hud [data-hud=startwave]:hover { background: #333d; }
+    #hud [data-hud=restart] { bottom: auto; top: calc(32% + 96px); }
+    #hud [data-hud=startwave][hidden], #hud [data-hud=restart][hidden] { display: none; }
+    #hud [data-hud=startwave]:hover, #hud [data-hud=restart]:hover { background: #333d; }
     @keyframes startpulse { 50% { transform: translateX(-50%) scale(1.06); } }
-    @media (prefers-reduced-motion: reduce) { #hud [data-hud=startwave] { animation: none; } }
+    @media (prefers-reduced-motion: reduce) { #hud [data-hud=startwave], #hud [data-hud=restart] { animation: none; } }
     #hud kbd {
       padding: 0 6px; border: 1px solid #fff8; border-radius: 4px; background: #0003; font: inherit;
     }
@@ -103,34 +108,89 @@
       width: 96px; height: 96px; border-radius: 50%; border: 2px dashed #fff5;
     }
     #touch .stick-hint.gone { display: none; }
+    /* Every touch button says what it does. Big round ones for the thumbs that move, wide ones for the rest. */
     #touch button {
-      position: absolute; pointer-events: auto; touch-action: none;
-      border: 2px solid #fff8; border-radius: 50%; background: #0003; color: #fff;
-      font: 700 13px ui-monospace, Menlo, Consolas, monospace; text-shadow: 0 1px 2px #000a; padding: 0;
+      position: absolute; pointer-events: auto; touch-action: none; padding: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+      border: 2px solid #fff8; background: #0004; color: #fff;
+      font: 700 13px/1.1 ui-monospace, Menlo, Consolas, monospace; text-shadow: 0 1px 2px #000a;
+    }
+    #touch button[hidden] { display: none; }
+    #touch button small {
+      max-width: 100%; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+      font-size: 9px; font-weight: 500; opacity: 0.9;
     }
     #touch button.down, #touch button.on { background: #fff5; }
+    #touch button.dim { opacity: 0.55; }
+    #touch button.bad { border-color: #ff8a8a; color: #ffb0b0; }
+    #touch [data-touch=jump], #touch [data-touch=crouch] { border-radius: 50%; }
     #touch [data-touch=jump] {
       width: 84px; height: 84px; right: calc(28px + env(safe-area-inset-right)); bottom: calc(36px + env(safe-area-inset-bottom));
+      font-size: 16px;
     }
     #touch [data-touch=crouch] {
       width: 62px; height: 62px; right: calc(124px + env(safe-area-inset-right)); bottom: calc(28px + env(safe-area-inset-bottom));
     }
-    #touch .small {
-      width: 40px; height: 40px; top: calc(10px + env(safe-area-inset-top)); font-size: 12px; border-radius: 10px;
+    #touch .pill { border-radius: 12px; }
+    /* BUILD and SELL stack above JUMP. */
+    #touch [data-touch=place], #touch [data-touch=sell] {
+      width: 112px; height: 50px; right: calc(14px + env(safe-area-inset-right));
     }
-    #touch [data-touch=fullscreen] { right: calc(12px + env(safe-area-inset-right)); }
-    #touch [data-touch=respawn] { right: calc(58px + env(safe-area-inset-right)); }
-    #touch [data-touch=autoHop] { right: calc(104px + env(safe-area-inset-right)); }
-    #touch [data-touch=sensUp] { right: calc(150px + env(safe-area-inset-right)); }
-    #touch [data-touch=sensDown] { right: calc(196px + env(safe-area-inset-right)); }
-    #touch [data-touch=wave] { right: calc(242px + env(safe-area-inset-right)); }
-    #touch [data-touch=mute] { right: calc(288px + env(safe-area-inset-right)); }
-    #touch [data-touch=build], #touch [data-touch=place] {
-      width: 62px; height: 62px; right: calc(28px + env(safe-area-inset-right)); font-size: 11px;
+    #touch [data-touch=sell] { bottom: calc(130px + env(safe-area-inset-bottom)); }
+    #touch [data-touch=place] { bottom: calc(186px + env(safe-area-inset-bottom)); }
+    #touch [data-touch=place]:not(.dim):not(.bad) { border-color: #ffd84d; }
+    /* PAUSE and NEXT WAVE sit in the top-right corner, above the milk and moolah readout. */
+    #touch [data-touch=pause], #touch [data-touch=wave] {
+      height: 38px; top: calc(10px + env(safe-area-inset-top)); padding: 0 12px; flex-direction: row;
     }
-    #touch [data-touch=build] { bottom: calc(196px + env(safe-area-inset-bottom)); }
-    #touch [data-touch=place] { bottom: calc(128px + env(safe-area-inset-bottom)); }
-    body.touch-device #hud .td { top: calc(58px + env(safe-area-inset-top)); }
+    #touch [data-touch=pause] { right: calc(12px + env(safe-area-inset-right)); }
+    #touch [data-touch=wave] { right: calc(116px + env(safe-area-inset-right)); }
+    /* Milk and moolah go under the speed readout on the left, keeping the right edge free for the buttons. */
+    body.touch-device #hud .td {
+      right: auto; left: calc(14px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); text-align: left;
+    }
+    body.touch-device #hud .milk { margin-left: 0; }
+    /* Tower bar on touch: tap a tower to pick it (tap again to stop building). Compact two-line buttons that
+       end just left of CROUCH, so the bar never covers a thumb button whatever the screen width. */
+    body.touch-device #hud [data-hud=buildbar] {
+      left: auto; transform: none; right: calc(198px + env(safe-area-inset-right)); gap: 6px; font-size: 11px;
+    }
+    body.touch-device #hud [data-hud=buildbar] .slot {
+      display: flex; flex-direction: column; align-items: center; padding: 5px 8px; line-height: 1.2;
+    }
+    body.touch-device #hud [data-hud=buildbar] .slot kbd { display: none; }
+    /* The big start / try-again buttons move to the top so the tower bar never covers them. */
+    body.touch-device #hud [data-hud=startwave] { bottom: auto; top: calc(56px + env(safe-area-inset-top)); }
+
+    /* Pause menu: a full-screen overlay with big labelled buttons. */
+    #pause {
+      position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; background: #000b;
+      font: 600 14px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #fff;
+    }
+    #pause[hidden] { display: none; }
+    #pause .panel {
+      width: min(92vw, 440px); max-height: 96vh; overflow-y: auto; box-sizing: border-box;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 14px;
+      border-radius: 14px; border: 2px solid #fff4; background: #1b1b24;
+    }
+    #pause h2 { grid-column: 1 / -1; margin: 0; text-align: center; font-size: 22px; letter-spacing: 4px; }
+    #pause .wide, #pause .sens { grid-column: 1 / -1; }
+    #pause .keys { grid-column: 1 / -1; text-align: center; font-size: 12px; opacity: 0.8; }
+    #pause .sens { display: grid; grid-template-columns: 56px 1fr 56px; gap: 8px; align-items: center; text-align: center; }
+    #pause button {
+      min-height: 44px; padding: 6px 10px; border-radius: 10px; border: 2px solid #fff5; background: #fff1; color: #fff;
+      font: inherit; cursor: pointer; touch-action: manipulation;
+    }
+    #pause button:hover, #pause button:active { background: #fff3; }
+    #pause .primary { border-color: #ffd84d; color: #ffd84d; font-size: 18px; min-height: 52px; }
+    #pause .danger { border-color: #ff8a8a; color: #ff8a8a; }
+    #pause .danger.armed { background: #ff8a8a; color: #200; }
+    @media (max-height: 450px) {
+      #pause .panel { gap: 6px; padding: 10px; }
+      #pause h2 { font-size: 18px; }
+      #pause button { min-height: 38px; }
+      #pause .primary { min-height: 44px; font-size: 16px; }
+    }
     @media (max-width: 700px), (max-height: 450px) {
       #hud .readout { font-size: 12px; }
       #hud [data-hud=speed] { font-size: 20px; }
@@ -156,32 +216,46 @@
     <div data-hud="buildbar"></div>
     <div data-hud="banner"></div>
     <button data-hud="startwave" tabindex="-1" hidden>START WAVE 1 <kbd class="desk-only">N</kbd></button>
+    <button data-hud="restart" tabindex="-1" hidden>TRY AGAIN <kbd class="desk-only">Enter</kbd></button>
     <div data-hud="notice"></div>
     <div data-hud="hint">
       <b class="desk-only">Click to play</b>
       <b class="touch-only">Tap to play</b>
       <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
       <div class="desk-only"><kbd>1</kbd>–<kbd>3</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
-      <div class="desk-only"><kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>M</kbd> mute · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
+      <div class="desk-only"><kbd>P</kbd> pause · <kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>M</kbd> mute · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
       <div class="touch-only">Left thumb: move · drag the right side to look</div>
       <div class="touch-only">Drag from the jump button to steer mid-air</div>
-      <div class="touch-only">BUILD picks a tower · PLACE builds it (or sells the tower you look at)</div>
+      <div class="touch-only">Tap a tower in the bar, aim, then BUILD · SELL removes the tower you look at</div>
+      <div class="touch-only">❚❚ PAUSE opens sound, look speed, restart and more</div>
     </div>
   </div>
   <div id="touch" hidden>
     <div class="stick-hint"></div>
     <div class="stick"><div class="knob"></div></div>
-    <button data-touch="jump" aria-label="Jump">JUMP</button>
-    <button data-touch="crouch" aria-label="Crouch (toggle)">DUCK</button>
-    <button class="small" data-touch="sensDown" aria-label="Lower look sensitivity">S−</button>
-    <button class="small" data-touch="sensUp" aria-label="Raise look sensitivity">S+</button>
-    <button class="small" data-touch="autoHop" aria-label="Toggle auto-hop">HOP</button>
-    <button class="small" data-touch="respawn" aria-label="Respawn">R</button>
-    <button class="small" data-touch="fullscreen" aria-label="Fullscreen">⛶</button>
-    <button data-touch="build" aria-label="Pick a tower to build">BUILD</button>
-    <button data-touch="place" aria-label="Build, or sell the tower you look at">PLACE</button>
-    <button class="small" data-touch="wave" aria-label="Start the next wave">N</button>
-    <button class="small" data-touch="mute" aria-label="Mute or unmute sound">♪</button>
+    <button data-touch="jump" aria-label="Jump"><b>JUMP</b></button>
+    <button data-touch="crouch" aria-label="Crouch (tap to switch on or off)"><b>CROUCH</b><small>tap on/off</small></button>
+    <button class="pill" data-touch="place" aria-label="Build the selected tower where you are aiming"><b>BUILD</b><small>pick a tower</small></button>
+    <button class="pill" data-touch="sell" aria-label="Sell the tower you are looking at"><b>SELL</b><small>look at a tower</small></button>
+    <button class="pill" data-touch="wave" aria-label="Start the next wave now" hidden><b>▶▶ NEXT WAVE</b></button>
+    <button class="pill" data-touch="pause" aria-label="Pause and open the menu"><b>❚❚ PAUSE</b></button>
+  </div>
+  <div id="pause" hidden>
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <button class="wide primary" data-menu="resume">▶ RESUME</button>
+      <button data-menu="sound">SOUND: ON</button>
+      <button data-menu="autoHop">AUTO-HOP: OFF</button>
+      <div class="sens">
+        <button data-menu="sensDown" aria-label="Look slower">−</button>
+        <span data-menu="sensLabel">LOOK SPEED</span>
+        <button data-menu="sensUp" aria-label="Look faster">+</button>
+      </div>
+      <button data-menu="fullscreen">FULLSCREEN</button>
+      <button data-menu="respawn" title="Back to the start position">RESPAWN</button>
+      <button class="wide danger" data-menu="restart">RESTART GAME</button>
+      <div class="keys desk-only">Press P to resume</div>
+    </div>
   </div>
   <script type="module" src="./src/main.js"></script>
 </body>

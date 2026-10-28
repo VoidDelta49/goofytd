@@ -208,3 +208,72 @@ test('fullscreen lock: on by default, ?fs=0 opts out and is remembered, ?fs=1 op
   assert(loadFullscreenLock(null, { getItem() { throw new Error('blocked'); } }), 'blocked storage turned it off');
   assert(!loadFullscreenLock('0', { setItem() { throw new Error('blocked'); } }), '?fs=0 failed with blocked storage');
 });
+
+// ---- touch button labels and the pause menu (no real DOM: tiny fakes) ----
+
+import { touchButtonState } from '../src/client/touch.js';
+import { PauseMenu, RESTART_CONFIRM_MS } from '../src/client/menu.js';
+import { TOWER_TYPES, SELL_REFUND } from '../src/sim/towers.js';
+
+test('touch buttons: BUILD / SELL explain themselves and only light up when usable', () => {
+  const id = Object.keys(TOWER_TYPES)[0];
+  const def = TOWER_TYPES[id];
+  const game = { money: 1000, wave: 3, lost: false };
+  const idle = touchButtonState(game, { selected: null, lookTower: null, preview: null });
+  assert(idle.place.dim && idle.place.sub === 'pick a tower', 'BUILD should ask for a tower first');
+  assert(idle.sell.dim && idle.sell.sub === 'look at a tower', 'SELL should ask you to look at a tower');
+
+  const ready = touchButtonState(game, { selected: id, lookTower: null, preview: { ok: true } });
+  assert(!ready.place.dim && !ready.place.bad && ready.place.sub === def.name, 'BUILD should name the selected tower');
+  const blocked = touchButtonState(game, { selected: id, lookTower: null, preview: { ok: false, reason: 'occupied' } });
+  assert(blocked.place.bad, 'BUILD should flag a ghost that cannot be placed');
+  const poor = touchButtonState({ ...game, money: def.cost - 1 }, { selected: id, lookTower: null, preview: { ok: true } });
+  assert(poor.place.bad && poor.place.sub === 'need more moolah', 'BUILD should say when moolah is short');
+
+  const sell = touchButtonState(game, { selected: null, lookTower: { spent: 100 }, preview: null });
+  assert(!sell.sell.dim && sell.sell.sub === `+${Math.floor(100 * SELL_REFUND)} moolah`, `SELL refund text: ${sell.sell.sub}`);
+});
+
+test('touch buttons: NEXT WAVE hides before wave 1 (START button) and after losing (TRY AGAIN)', () => {
+  const b = { selected: null, lookTower: null, preview: null };
+  assert(touchButtonState({ money: 0, wave: 0, lost: false }, b).wave.hidden, 'hidden at wave 0');
+  assert(!touchButtonState({ money: 0, wave: 2, lost: false }, b).wave.hidden, 'shown mid-game');
+  assert(touchButtonState({ money: 0, wave: 2, lost: true }, b).wave.hidden, 'hidden when lost');
+});
+
+function fakeMenu(state) {
+  const els = {};
+  for (const n of ['sound', 'autoHop', 'sensLabel', 'restart']) {
+    els[n] = { textContent: '', classList: { on: false, toggle(_c, v) { this.on = v; } }, dataset: { menu: n } };
+  }
+  const root = { hidden: true, addEventListener() {}, querySelector: (sel) => els[/data-menu=(\w+)/.exec(sel)[1]] };
+  const calls = [];
+  const actions = new Proxy({}, { get: (_, name) => () => calls.push(name) });
+  const menu = new PauseMenu(root, actions, () => state);
+  const tap = (name) => menu.onClick({ target: { closest: () => ({ dataset: { menu: name } }) } });
+  return { menu, els, calls, tap, root };
+}
+
+test('pause menu: labels show the current values and update when opened', () => {
+  const m = fakeMenu({ muted: true, autoHop: false, sens: '1.5' });
+  m.menu.show();
+  assert(!m.root.hidden, 'show should reveal the overlay');
+  assert(m.els.sound.textContent === 'SOUND: OFF', m.els.sound.textContent);
+  assert(m.els.autoHop.textContent === 'AUTO-HOP: OFF', m.els.autoHop.textContent);
+  assert(m.els.sensLabel.textContent === 'LOOK SPEED 1.5', m.els.sensLabel.textContent);
+  m.menu.hide();
+  assert(m.root.hidden, 'hide should hide');
+});
+
+test('pause menu: RESTART needs a second tap, and the first tap says so', () => {
+  const m = fakeMenu({ muted: false, autoHop: true, sens: '0.30°/px' });
+  m.menu.show();
+  m.tap('restart');
+  assert(m.calls.length === 0, 'one tap must not restart');
+  assert(m.els.restart.textContent === 'TAP AGAIN TO RESTART', m.els.restart.textContent);
+  m.tap('restart');
+  assert(m.calls.join() === 'restart', `second tap should restart, got ${m.calls}`);
+  m.tap('resume');
+  assert(m.calls.join() === 'restart,resume', 'other buttons act at once');
+  assert(RESTART_CONFIRM_MS >= 2000, 'confirm window too short for a thumb');
+});

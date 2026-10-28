@@ -6,6 +6,8 @@
 // pointers in the overlay, so a mouse on a touch laptop still reaches the
 // canvas and pointer lock.
 
+import { SELL_REFUND, TOWER_TYPES } from '../sim/towers.js';
+
 /** CSS px of finger travel for full stick deflection. */
 export const STICK_RADIUS = 56;
 /** Fraction of the radius ignored around the centre (thumb jitter). */
@@ -25,6 +27,35 @@ export function stickVector(dx, dy, radius = STICK_RADIUS, deadzone = STICK_DEAD
   const mag = Math.min((len - deadzone) / (1 - deadzone), 1);
   const s = mag / (len * radius);
   return { x: dx * s, y: -dy * s };
+}
+
+/**
+ * What the build / sell / next-wave buttons should say right now. Pure (no DOM)
+ * so it can be tested: `sub` is the small second line, `dim` means "nothing to
+ * do yet" (still tappable, it explains itself), `bad` means the ghost can't go there.
+ */
+export function touchButtonState(game, build) {
+  const sel = build.selected !== null ? TOWER_TYPES[build.selected] : null;
+  const look = build.lookTower;
+  let place;
+  if (!sel) place = { sub: 'pick a tower', dim: true, bad: false };
+  else if (game.money < sel.cost) place = { sub: 'need more moolah', dim: false, bad: true };
+  else place = { sub: sel.name, dim: false, bad: !!build.preview && !build.preview.ok };
+  const sell = look
+    ? { sub: `+${Math.floor(look.spent * SELL_REFUND)} moolah`, dim: false }
+    : { sub: 'look at a tower', dim: true };
+  // Wave 1 has its own big START button; a lost game has TRY AGAIN.
+  const wave = { hidden: game.wave === 0 || game.lost };
+  return { place, sell, wave };
+}
+
+/**
+ * Keep receiving a finger's moves after it leaves the element. Only a nicety
+ * for drags: the browser throws InvalidStateError for a pointer that is
+ * already gone (a very quick tap), and that must never stop the button's action.
+ */
+function capture(el, pointerId) {
+  try { el.setPointerCapture(pointerId); } catch { /* pointer already released */ }
 }
 
 export class TouchControls {
@@ -56,7 +87,8 @@ export class TouchControls {
       btn.addEventListener('pointercancel', (e) => this.onButtonUp(e, btn));
       btn.addEventListener('contextmenu', (e) => e.preventDefault());
     }
-    if (!document.fullscreenEnabled) this.buttons.fullscreen.hidden = true;
+    /** Last text/flags written per button, so the DOM is only touched on change. */
+    this.shown = {};
 
     canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     canvas.addEventListener('pointermove', (e) => this.onMove(e));
@@ -88,7 +120,7 @@ export class TouchControls {
       this.enable();
       return; // The "tap to play" tap only starts the game.
     }
-    this.canvas.setPointerCapture(e.pointerId);
+    capture(this.canvas, e.pointerId);
     const hasStick = [...this.touches.values()].some((t) => t.role === 'stick');
     const role = !hasStick && e.clientX < window.innerWidth * STICK_ZONE ? 'stick' : 'look';
     this.touches.set(e.pointerId, { role, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
@@ -134,7 +166,7 @@ export class TouchControls {
     e.preventDefault();
     e.stopPropagation();
     this.enable();
-    btn.setPointerCapture(e.pointerId);
+    capture(btn, e.pointerId);
     btn.classList.add('down');
     const { player, cfg } = this.input;
     switch (btn.dataset.touch) {
@@ -148,17 +180,12 @@ export class TouchControls {
       // Toggle, not hold: crouch-jumping needs stick + jump + crouch, and a
       // phone held in two hands has two thumbs.
       case 'crouch': this.crouchOn = !this.crouchOn; break;
-      case 'respawn': player.pending.respawn = true; break;
-      case 'autoHop': cfg.autoHop = !cfg.autoHop; break;
-      case 'sensDown': this.input.adjustTouchSensitivity(-0.05); break;
-      case 'sensUp': this.input.adjustTouchSensitivity(0.05); break;
-      case 'fullscreen': this.toggleFullscreen(); break;
-      // Building: BUILD cycles the tower type (then off), PLACE builds it, or
-      // sells the tower you're looking at when not building.
-      case 'build': this.input.handlers.cycleTower?.(); break;
-      case 'place': this.input.handlers.placeOrSell?.(); break;
+      // Building: tap a tower in the bar to pick it, BUILD places the ghost, SELL
+      // removes the tower you're looking at. Everything else lives in the pause menu.
+      case 'place': this.input.handlers.place?.(); break;
+      case 'sell': this.input.handlers.sell?.(); break;
       case 'wave': this.input.handlers.nextWave?.(); break;
-      case 'mute': this.input.handlers.mute?.(); break;
+      case 'pause': this.input.handlers.pause?.(); break;
     }
     this.syncButtons();
   }
@@ -173,18 +200,34 @@ export class TouchControls {
 
   syncButtons() {
     this.buttons.crouch.classList.toggle('on', this.crouchOn);
-    this.buttons.autoHop.classList.toggle('on', this.input.cfg.autoHop);
+    this.setSub('crouch', this.crouchOn ? 'ON' : 'tap on/off');
   }
 
-  async toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
-        // Landscape lock only works in fullscreen, and only on some browsers.
-        await screen.orientation?.lock?.('landscape').catch(() => {});
-      }
-    } catch { /* refused: stay windowed */ }
+  /** Per-frame: relabel BUILD / SELL and show or hide NEXT WAVE from the game state. */
+  syncGame(game, build) {
+    const st = touchButtonState(game, build);
+    for (const name of ['place', 'sell']) {
+      const b = this.buttons[name], v = st[name];
+      this.setSub(name, v.sub);
+      this.setFlag(b, 'dim', v.dim);
+      this.setFlag(b, 'bad', !!v.bad);
+    }
+    this.setFlag(this.buttons.wave, 'hidden', st.wave.hidden);
+  }
+
+  setSub(name, text) {
+    const key = `${name}.sub`;
+    if (this.shown[key] === text) return;
+    this.shown[key] = text;
+    const el = this.buttons[name].querySelector('small');
+    if (el) el.textContent = text;
+  }
+
+  setFlag(btn, flag, on) {
+    const key = `${btn.dataset.touch}.${flag}`;
+    if (this.shown[key] === on) return;
+    this.shown[key] = on;
+    if (flag === 'hidden') btn.hidden = on;
+    else btn.classList.toggle(flag, on);
   }
 }

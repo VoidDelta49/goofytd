@@ -23,7 +23,11 @@ export class Hud {
     this.bannerEl = root.querySelector('[data-hud=banner]');
     /** "Start wave 1" button, shown until the first wave begins (and again after a restart). */
     this.startEl = root.querySelector('[data-hud=startwave]');
+    /** "Try again" button, shown once the milk is gone (Enter only works with a keyboard). */
+    this.restartEl = root.querySelector('[data-hud=restart]');
     this.buildSlots = [];
+    /** Touch layout: hints name the on-screen buttons instead of keys. */
+    this.touchUi = document.body.classList.contains('touch-device');
     this.frameTimes = [];
     this.lastText = 0;
   }
@@ -33,7 +37,7 @@ export class Hud {
     this.updateTd(now, game, build);
     this.frameTimes.push(frameDt);
     if (this.frameTimes.length > 60) this.frameTimes.shift();
-    this.hintEl.hidden = input.active;
+    this.hintEl.hidden = input.active || input.paused;
     if (this.noticeEl.textContent !== input.notice) this.noticeEl.textContent = input.notice;
 
     // Text 15× per second is plenty and avoids per-frame layout work.
@@ -58,9 +62,8 @@ export class Hud {
     this.infoEl.textContent =
       `top ${player.topSpeed.toFixed(2)} · ${where}${s.crouched ? ', crouched' : ''}` +
       ` · auto-hop ${cfg.autoHop ? 'on' : 'off'}` +
-      (input.touch.enabled
-        ? ` · look ${input.settings.touchSensitivity.toFixed(2)}°/px`
-        : ` · sens ${input.settings.sensitivity.toFixed(1)}`) +
+      // On touch, look speed lives in the pause menu; keep this line short so it clears NEXT WAVE.
+      (input.touch.enabled ? '' : ` · sens ${input.settings.sensitivity.toFixed(1)}`) +
       ` · ${avg > 0 ? Math.round(1 / avg) : 0} fps`;
   }
 
@@ -72,6 +75,7 @@ export class Hud {
       this.buildSlots = ids.map((id, k) => {
         const el = document.createElement('div');
         el.className = 'slot';
+        el.dataset.n = String(k + 1);
         const t = TOWER_TYPES[id];
         el.innerHTML = `<kbd>${k + 1}</kbd> ${t.name} <span class="cost">${t.cost}</span>`;
         el.title = t.blurb;
@@ -88,6 +92,7 @@ export class Hud {
     this.milkBar.style.width = `${pct}%`;
     const waitingForFirst = game.wave === 0 && !game.lost;
     if (this.startEl.hidden === waitingForFirst) this.startEl.hidden = !waitingForFirst;
+    if (this.restartEl.hidden === game.lost) this.restartEl.hidden = !game.lost;
     const next = game.nextWaveIn !== null
       ? `next in ${Math.ceil(game.nextWaveIn)} s`
       : game.wave === 0 ? 'N: start' : game.spawning ? 'incoming' : game.cows.count ? 'mooing' : 'N: next wave';
@@ -99,14 +104,16 @@ export class Hud {
     if (build.message && now < build.messageUntil) place = build.message;
     else if (build.preview) {
       const p = build.preview;
-      place = p.ok ? `${p.type.name}: ${p.type.cost} · click/E to build · Q cancels` : `${p.type.name}: ${p.reason}`;
+      place = p.ok
+        ? `${p.type.name}: ${p.type.cost} · ${this.touchUi ? 'tap BUILD' : 'click/E to build · Q cancels'}`
+        : `${p.type.name}: ${p.reason}`;
     } else if (build.lookTower) {
       const t = build.lookTower;
-      place = `${t.def.name} · ${t.kills} kills · X sells for ${Math.floor(t.spent * SELL_REFUND)}`;
+      place = `${t.def.name} · ${t.kills} kills · ${this.touchUi ? 'tap SELL' : 'X'} sells for ${Math.floor(t.spent * SELL_REFUND)}`;
     }
     setText(this.placeEl, place);
     this.placeEl.classList.toggle('bad', !!build.preview && !build.preview.ok);
-    setText(this.bannerEl, game.lost ? `THE COWS DRANK ALL THE MILK\nwave ${game.wave} · ${game.kills} kills · Enter to try again` : '');
+    setText(this.bannerEl, game.lost ? `THE COWS DRANK ALL THE MILK\nwave ${game.wave} · ${game.kills} kills` : '');
   }
 }
 
