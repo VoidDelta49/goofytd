@@ -158,6 +158,7 @@ export class TouchControls {
       case 'build': this.input.handlers.cycleTower?.(); break;
       case 'place': this.input.handlers.placeOrSell?.(); break;
       case 'wave': this.input.handlers.nextWave?.(); break;
+      case 'mute': this.input.handlers.mute?.(); break;
     }
     this.syncButtons();
   }

@@ -61,6 +61,7 @@ export const ATTACKS = {
       arc: t.def.arcHeight, t: 0, prevT: 0, T,
       damage: t.def.damage, radius: t.def.splashRadius, color: t.def.shotColor,
     });
+    game.events.push({ kind: 'launch', tower: t.id, x: t.muzzleX, z: t.muzzleZ });
   },
 };
 

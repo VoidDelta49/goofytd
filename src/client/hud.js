@@ -21,6 +21,8 @@ export class Hud {
     this.buildBar = root.querySelector('[data-hud=buildbar]');
     this.placeEl = root.querySelector('[data-hud=place]');
     this.bannerEl = root.querySelector('[data-hud=banner]');
+    /** "Start wave 1" button, shown until the first wave begins (and again after a restart). */
+    this.startEl = root.querySelector('[data-hud=startwave]');
     this.buildSlots = [];
     this.frameTimes = [];
     this.lastText = 0;
@@ -84,9 +86,11 @@ export class Hud {
 
     const pct = Math.max(0, game.milk / game.cfg.milk) * 100;
     this.milkBar.style.width = `${pct}%`;
+    const waitingForFirst = game.wave === 0 && !game.lost;
+    if (this.startEl.hidden === waitingForFirst) this.startEl.hidden = !waitingForFirst;
     const next = game.nextWaveIn !== null
       ? `next in ${Math.ceil(game.nextWaveIn)} s`
-      : game.spawning ? 'incoming' : game.cows.count ? 'mooing' : 'N: next wave';
+      : game.wave === 0 ? 'N: start' : game.spawning ? 'incoming' : game.cows.count ? 'mooing' : 'N: next wave';
     setText(this.tdEl,
       `milk ${Math.ceil(game.milk)} · moolah ${game.money}\n` +
       `wave ${game.wave} (${next}) · cows ${game.cows.count} · kills ${game.kills}`);

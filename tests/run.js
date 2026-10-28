@@ -3,6 +3,7 @@ import './sim.test.js';
 import './loop.test.js';
 import './input.test.js';
 import './td.test.js';
+import './audio.test.js';
 import { runAll } from './harness.js';
 
 const { failed } = await runAll();

@@ -35,10 +35,11 @@ export const BINDINGS = {
   cancelBuild: ['KeyQ'],
   nextWave: ['KeyN'],
   restart: ['Enter'],
+  mute: ['KeyM'],
 };
 
 /** Actions forwarded to `Input.handlers` (set by main.js) on key down. */
-const HANDLED_ACTIONS = ['place', 'sell', 'cancelBuild', 'nextWave', 'restart'];
+const HANDLED_ACTIONS = ['place', 'sell', 'cancelBuild', 'nextWave', 'restart', 'mute'];
 
 const SETTINGS_KEY = 'goofytd.settings';
 
@@ -65,16 +66,17 @@ export function loadSettings(storage = globalThis.localStorage) {
 }
 
 /**
- * Whether clicking into the game should also go fullscreen. Set on its own
- * key (not in settings) once the Firefox echo filter has fired: that browser
- * can't hold the cursor inside a window, but fullscreen confines it.
- * `?fs=1` forces it on, `?fs=0` turns it off and forgets it.
+ * Whether any click, tap or key press should also go fullscreen. On by
+ * default (fullscreen also confines the cursor, which Firefox needs). `?fs=0`
+ * opts out and remembers it; `?fs=1` opts back in.
  */
-const FS_KEY = 'goofytd.fullscreenLock';
+const FS_KEY = 'goofytd.fullscreenLock'; // '0' = opted out
 export function loadFullscreenLock(fs, storage = globalThis.localStorage) {
-  if (fs === '0') { try { storage?.removeItem(FS_KEY); } catch { /* blocked */ } return false; }
-  if (fs === '1') return true;
-  try { return storage?.getItem(FS_KEY) === '1'; } catch { return false; }
+  try {
+    if (fs === '0') { storage?.setItem(FS_KEY, '0'); return false; }
+    if (fs === '1') { storage?.removeItem(FS_KEY); return true; }
+    return storage?.getItem(FS_KEY) !== '0';
+  } catch { return fs !== '0'; }
 }
 
 function saveSettings(settings) {
@@ -106,20 +108,24 @@ export class Input {
     /** Raw (unaccelerated) lock is opt-in with ?raw=1; it misreports on some Linux setups. */
     this.rawMouse = params.get('raw') === '1';
     this.debug = params.has('debug');
-    /** Go fullscreen together with mouse capture (cursor can't leave the window then). */
+    /** Go fullscreen on any click, tap or key (cursor can't leave the window then). */
     this.fullscreenLock = loadFullscreenLock(params.get('fs'));
+    this.fsPending = false;
     this.echoHandled = false;
     this.noticeUntil = 0;
     this.lockMode = 'none';
     this.lockPending = false;
     this.refusals = 0;
     this.lastUnlockAt = -Infinity;
-    /** Game actions (building, waves) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, selectTower(n), cycleTower }. */
+    /** Game actions (building, waves, sound) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, mute, selectTower(n), cycleTower }. */
     this.handlers = {};
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
 
+    for (const ev of ['pointerdown', 'pointerup', 'keydown']) {
+      window.addEventListener(ev, (e) => this.onGesture(e), { capture: true, passive: true });
+    }
     target.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     // Clicks while captured build (left) or cancel building (right).
     // mousedown, not pointerdown: a second button pressed while the first
@@ -201,9 +207,33 @@ export class Input {
   }
 
   enterFullscreen() {
-    const root = document.documentElement;
-    if (!document.fullscreenEnabled || document.fullscreenElement) return;
-    root.requestFullscreen({ navigationUI: 'hide' }).catch(() => { /* refused: carry on windowed */ });
+    if (this.fsPending || !document.fullscreenEnabled || document.fullscreenElement) return;
+    this.fsPending = true;
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(() => {
+        // Landscape lock only works in fullscreen, and only on some browsers.
+        if (matchMedia('(pointer: coarse)').matches) {
+          try { screen.orientation?.lock?.('landscape')?.catch?.(() => {}); } catch { /* unsupported */ }
+        }
+      })
+      .catch(() => { /* refused: carry on windowed */ })
+      .finally(() => { this.fsPending = false; });
+  }
+
+  /**
+   * Any interaction re-enters fullscreen (after Esc or F took it away). It has
+   * to be requested from the gesture itself, so this listens on the capture
+   * phase of window. Browsers count mouse *down* but touch/pen *up* as the
+   * activating event.
+   */
+  onGesture(e) {
+    if (!this.fullscreenLock) return;
+    if (e.type === 'pointerdown' && e.pointerType !== 'mouse') return;
+    if (e.type === 'pointerup' && e.pointerType === 'mouse') return;
+    if (e.type === 'keydown' && (e.code === 'Escape' || BINDINGS.fullscreen.includes(e.code))) return;
+    // The fullscreen button and F key are the ways out; don't undo them.
+    if (e.target?.closest?.('[data-touch=fullscreen]')) return;
+    this.enterFullscreen();
   }
 
   toggleFullscreen() {
@@ -213,14 +243,12 @@ export class Input {
 
   /**
    * The look filter just saw Firefox's cursor-echo stream, so this browser is
-   * not holding the cursor in place. Remember to use fullscreen from now on,
-   * and say so once.
+   * not holding the cursor in place. Fullscreen on interaction normally
+   * covers that already; only someone who opted out (?fs=0) gets told.
    */
   onEchoDetected() {
-    this.fullscreenLock = true;
-    try { localStorage.setItem(FS_KEY, '1'); } catch { /* private mode */ }
-    if (document.fullscreenElement || !document.fullscreenEnabled) return;
-    this.notice = 'Your browser lets the cursor roam outside the window. Press F for fullscreen (from now on clicking will do it for you). ?fs=0 turns that off.';
+    if (this.fullscreenLock || document.fullscreenElement || !document.fullscreenEnabled) return;
+    this.notice = 'Your browser lets the cursor roam outside the window. Press F for fullscreen, or use ?fs=1 to go fullscreen on every click.';
     this.noticeUntil = performance.now() + 10000;
   }
 

@@ -197,11 +197,14 @@ function fakeStorage(init = {}) {
   return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) };
 }
 
-test('fullscreen lock: remembered flag, ?fs=1 forces, ?fs=0 turns off and forgets', () => {
-  assert(!loadFullscreenLock(null, fakeStorage()), 'on by default');
-  assert(loadFullscreenLock(null, fakeStorage({ 'goofytd.fullscreenLock': '1' })), 'stored flag ignored');
+test('fullscreen lock: on by default, ?fs=0 opts out and is remembered, ?fs=1 opts back in', () => {
+  assert(loadFullscreenLock(null, fakeStorage()), 'off by default');
+  assert(loadFullscreenLock(null, fakeStorage({ 'goofytd.fullscreenLock': '1' })), 'old stored flag turned it off');
   assert(loadFullscreenLock('1', fakeStorage()), '?fs=1 ignored');
-  const st = fakeStorage({ 'goofytd.fullscreenLock': '1' });
-  assert(!loadFullscreenLock('0', st) && !st.has('goofytd.fullscreenLock'), '?fs=0 did not clear');
-  assert(!loadFullscreenLock(null, { getItem() { throw new Error('blocked'); } }), 'blocked storage threw');
+  const st = fakeStorage();
+  assert(!loadFullscreenLock('0', st), '?fs=0 ignored');
+  assert(!loadFullscreenLock(null, st), 'opt-out not remembered');
+  assert(loadFullscreenLock('1', st) && loadFullscreenLock(null, st), '?fs=1 did not clear the opt-out');
+  assert(loadFullscreenLock(null, { getItem() { throw new Error('blocked'); } }), 'blocked storage turned it off');
+  assert(!loadFullscreenLock('0', { setItem() { throw new Error('blocked'); } }), '?fs=0 failed with blocked storage');
 });

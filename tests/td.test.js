@@ -188,8 +188,11 @@ test('td: mortar splash hits a group, leads moving targets, ignores point blank'
   const m = g.placeTower('mortar', 20, -40);
   // A huddle 20 m away, standing still on goal-free ground (they walk, so freeze them by zeroing speed after spawn).
   for (let k = 0; k < 5; k++) g.spawnCow(COW_TYPES.cow, 0 + k * 0.5, -40);
-  run(g, 0.1);
+  // tick() clears events, so collect them every tick (as main.js does).
+  const launches = [];
+  for (let i = 0; i < 7; i++) { g.tick(DT); launches.push(...g.events.filter((e) => e.kind === 'launch')); }
   assert(g.projectiles.length === 1, 'did not fire');
+  assert(launches.length === 1 && launches[0].tower === m.id && Number.isFinite(launches[0].x) && Number.isFinite(launches[0].z), 'no launch event');
   run(g, 1.2);
   // 22 damage to each of 5 cows in the splash.
   let hit = 0;

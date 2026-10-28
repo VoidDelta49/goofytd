@@ -31,6 +31,9 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Camera / mouse look | `src/client/look.js`: mouse deltas are filtered (first 2 events after a lock change, NaN, and out-of-nowhere spikes: >400 counts and >6× the previous event; no fixed cap, because browsers sum a whole frame's motion into one event) and accumulated, applied once per frame; camera orientation is a quaternion built straight from yaw/pitch (no Euler order, no roll). Standard pointer lock by default, raw input opt-in with `?raw=1`; `?debug` shows live mouse stats | Rewrite after reports of the view spinning erratically; the whole path is unit-tested and checked against the real three.js camera. |
 | Firefox echo filter | `MouseLook.isEcho()`: when Firefox's warp-to-anchor fails (seen on Linux X11/XWayland), every real delta is followed by an "echo" event whose movementX/Y is the cursor's whole offset from the anchor. After two confirmed echoes (each ≈ previous echo + the real delta between) those events are dropped; it switches off after 8 clean events. `?debug` shows `echoes` and `FIREFOX ECHO FILTER ON` | Cause of the jittery vertical look in Firefox, confirmed from a recorded event stream (`tests/fixtures/firefox-echo.json`, replayed in the tests). |
 | Pointer-lock refusals | Within 1.5 s of leaving the lock (Chrome's cooldown) or on a first refusal: stay paused and ask for another click. Drag-to-look only with no API or two refusals outside the cooldown | Auto-switching to drag-look on any refusal made the game flip in and out of capture and left a free cursor that clicked out of the window. |
+| Fullscreen on interaction | `Input.onGesture` listens (capture phase, on `window`) for mouse down, touch/pen up and key down, and requests fullscreen from that very gesture; skips Esc, F and the ⛶ button so they can still leave it. On by default; `?fs=0` opts out (stored). Touch also locks landscape where allowed | Browsers only grant fullscreen from a user gesture, and it also confines the cursor (Firefox needed that). Chrome counts mouse *down* but touch *up* as the activating event, hence both. |
+| First wave | `main.js` sets `firstWave = null`: wave 1 starts only from the START WAVE 1 button or N. Later waves stay automatic on the field, manual in the playground | Lets you build before the cows come, without a countdown. The button is a DOM element, shown while `game.wave === 0`. |
+| Sound | `src/client/audio.js`: every effect is synthesised with Web Audio when it plays (oscillators, filtered noise, envelopes), no sample files. Sim events (`shot`, `launch`, `splash`, `kill`, `drink`, `wave`, `lost`) map to sounds; UI sounds play where the click happens. Distance gain `(1 − d/70)²`, stereo pan from the view direction, per-sound throttle and overlap caps, 28 voices total, compressor on the master | No assets to download or license; thousands of cows and 40 towers would otherwise fire hundreds of sounds a second. Created on the first gesture (browsers lock audio until then). Events pushed outside `tick()` (hand-started waves, builds) are cleared by the next tick, so those sounds are triggered directly. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
 | Cow pathing | One shared flow field on a 2 m nav grid (`src/sim/navgrid.js`): Dijkstra outward from the cells around the milk, 8-way with no corner cutting, rebuilt only when a tower is built or sold | Cost is per grid, not per cow: 2000 cows tick in ~0.4 ms; a rebuild of the 100×100 field is ~2 ms. Towers can maze the cows, and the same field answers "how far is this cow from the milk" for targeting. |
@@ -64,7 +67,8 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | C or Left Shift | Crouch (not Ctrl: Ctrl+W closes the browser tab) |
 | R | Respawn |
 | H | Toggle auto-hop (hold jump to keep hopping) |
-| F | Toggle fullscreen. Once the Firefox echo filter has fired (that browser lets the cursor roam out of the window), clicking into the game goes fullscreen automatically; `?fs=1` forces that, `?fs=0` turns it off |
+| F | Toggle fullscreen. Any click, tap or key press also goes fullscreen (so it comes back after Esc); `?fs=0` opts out and remembers it, `?fs=1` opts back in |
+| M | Mute / unmute sound (remembered) |
 | [ and ] | Mouse sensitivity (saved in the browser) |
 | \\ | Reset sensitivity to defaults |
 | Esc | Release the mouse |
@@ -72,7 +76,7 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | Left click or E | Build the green ghost (red = not allowed, the reason shows under the crosshair) |
 | Q or right click | Stop building |
 | X | Sell the tower you're looking at (70% back) |
-| N | Start the next wave now (the playground only has manual waves) |
+| N | Start wave 1 (it never starts on its own, so you can build first), or the next wave now (the playground only has manual waves) |
 | Enter | Restart after the cows drink all the milk |
 
 If the browser refuses mouse capture (for example inside a sandboxed embed), a notice appears and you look by holding the left button and dragging instead.
@@ -90,6 +94,9 @@ Touch (phones and tablets; appears on the first tap):
 | BUILD | Cycle the tower to build (then off) |
 | PLACE | Build the ghost, or sell the tower you're looking at when not building |
 | N | Start the next wave now |
+| ♪ | Mute / unmute sound |
+
+The **START WAVE 1** button (bottom centre, shown until the first wave begins, and again after a restart) does the same as N; clicking it also captures the mouse.
 
 Movement tunables can be changed live from the browser console, e.g. `goofytd.cfg.airAccel = 20`; the match too: `goofytd.game.money = 9999`, `goofytd.game.startWave()`.
 
@@ -103,7 +110,7 @@ node tests/run.js        # or: npm test
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
-They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation), and tower defence: spawners reach the milk on every level, cows walk the flow field and drink, waves start and grow, losing, grid snapping, every placement refusal, mazing without sealing the milk, cows never walking through towers, towers being solid for the player and selling, the sell raycast, squirter kills and bounties, mortar splash/lead/min range, a custom tower type plugging in, same-seed determinism, and a 2000-cow / 40-tower benchmark (prints ms per tick).
+They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation), and tower defence: spawners reach the milk on every level, cows walk the flow field and drink, waves start and grow, losing, grid snapping, every placement refusal, mazing without sealing the milk, cows never walking through towers, towers being solid for the player and selling, the sell raycast, squirter kills and bounties, mortar splash/lead/min range, a custom tower type plugging in, same-seed determinism, a 2000-cow / 40-tower benchmark (prints ms per tick), and sound: positioning and panning, every synthesised sound building a valid graph (a fake context that throws on what browsers throw on), throttling, muting and event mapping.
 
 ## Movement model
 
@@ -159,6 +166,7 @@ src/client/             browser-only
   touch.js              touch stick, drag-look and buttons
   build.js              build mode: crosshair -> ground point, placement preview, sell target
   td-render.js          instanced cows, tower models from `parts`, ghost, tracers, shells, puffs
+  audio.js              procedural sound effects (Web Audio), positioning, throttling
   hud.js                speed/state/FPS, milk/money/wave, build bar, placement text, game-over banner
 tests/                  harness.js, *.test.js, run.js (Node), index.html (browser)
 ```
