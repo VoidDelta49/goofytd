@@ -9,7 +9,32 @@
   <title>CowTD</title>
   <!-- No build step: three.js comes straight from a CDN, pinned to an exact version. -->
   <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "./src/client/audio.js": "./src/client/audio.js?v=6e5195bd4b",
+        "./src/client/build.js": "./src/client/build.js?v=a43dbf97b5",
+        "./src/client/hud.js": "./src/client/hud.js?v=82f0087ad8",
+        "./src/client/input.js": "./src/client/input.js?v=ad7b8a2972",
+        "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
+        "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
+        "./src/client/render.js": "./src/client/render.js?v=b3d15c77e4",
+        "./src/client/td-render.js": "./src/client/td-render.js?v=12959012e8",
+        "./src/client/touch.js": "./src/client/touch.js?v=95df11ef0c",
+        "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
+        "./src/level.js": "./src/level.js?v=791f06864a",
+        "./src/main.js": "./src/main.js?v=324320ddce",
+        "./src/player.js": "./src/player.js?v=7536aa98e4",
+        "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
+        "./src/sim/cows.js": "./src/sim/cows.js?v=68261c9a26",
+        "./src/sim/game.js": "./src/sim/game.js?v=a382d8e1f2",
+        "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
+        "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
+        "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
+        "./src/sim/towers.js": "./src/sim/towers.js?v=949e54309d",
+        "./src/sim/vec3.js": "./src/sim/vec3.js?v=0643c68bb6"
+      }
+    }
   </script>
   <style>
     html, body {
@@ -154,6 +179,18 @@
        end just left of CROUCH, so the bar never covers a thumb button whatever the screen width. */
     body.touch-device #hud [data-hud=buildbar] {
       left: auto; transform: none; right: calc(198px + env(safe-area-inset-right)); gap: 6px; font-size: 11px;
+      /* Never wider than the space left of CROUCH: wrap upwards instead of sliding off the left edge. */
+      max-width: calc(100vw - 214px - env(safe-area-inset-left) - env(safe-area-inset-right));
+      flex-wrap: wrap; justify-content: flex-end;
+    }
+    /* Portrait: there's no room beside the thumb buttons, so the bar sits centred above BUILD / SELL. */
+    @media (orientation: portrait) {
+      body.touch-device #hud [data-hud=buildbar] {
+        right: auto; left: 50%; transform: translateX(-50%); justify-content: center;
+        bottom: calc(248px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px);
+      }
+      /* The long stats line would run under NEXT WAVE / PAUSE; speed stays. */
+      body.touch-device #hud [data-hud=info] { display: none; }
     }
     body.touch-device #hud [data-hud=buildbar] .slot {
       display: flex; flex-direction: column; align-items: center; padding: 5px 8px; line-height: 1.2;
@@ -182,6 +219,7 @@
       font: inherit; cursor: pointer; touch-action: manipulation;
     }
     #pause button:hover, #pause button:active { background: #fff3; }
+    #pause button[hidden] { display: none; }
     #pause .primary { border-color: #ffd84d; color: #ffd84d; font-size: 18px; min-height: 52px; }
     #pause .danger { border-color: #ff8a8a; color: #ff8a8a; }
     #pause .danger.armed { background: #ff8a8a; color: #200; }
@@ -257,6 +295,7 @@
       <div class="keys desk-only">Press P to resume</div>
     </div>
   </div>
-  <script type="module" src="./src/main.js"></script>
+  <!-- Through the import map (not src=) so main.js gets its ?v= content version too: see tools/stamp.js. -->
+  <script type="module">import './src/main.js';</script>
 </body>
 </html>

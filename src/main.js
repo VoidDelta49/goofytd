@@ -82,6 +82,8 @@ const menu = new PauseMenu(document.getElementById('pause'), {
   respawn: () => { player.pending.respawn = true; setPaused(false); },
   restart: () => { restartGame(); setPaused(false); },
 }, () => ({ muted: sfx.muted, autoHop: cfg.autoHop, sens: input.sensLabel }));
+// iPhone Safari has no element fullscreen: don't offer a button that does nothing.
+if (!document.fullscreenEnabled) document.querySelector('[data-menu=fullscreen]').hidden = true;
 
 function setPaused(p) {
   if (p === paused) return;

@@ -36,6 +36,8 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Sound | `src/client/audio.js`: every effect is synthesised with Web Audio when it plays (oscillators, filtered noise, envelopes), no sample files. Sim events (`shot`, `launch`, `splash`, `kill`, `drink`, `wave`, `lost`) map to sounds; UI sounds play where the click happens. Distance gain `(1 − d/70)²`, stereo pan from the view direction, per-sound throttle and overlap caps, 28 voices total, compressor on the master | No assets to download or license; thousands of cows and 40 towers would otherwise fire hundreds of sounds a second. Created on the first gesture (browsers lock audio until then). Events pushed outside `tick()` (hand-started waves, builds) are cleared by the next tick, so those sounds are triggered directly. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle. Every button carries a word, not a letter; BUILD / SELL relabel themselves from the game state (`touchButtonState`, unit-tested) | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. The old corner row of `S− S+ HOP R ⛶ N ♪` was unreadable, so rarely-used settings moved into the pause menu and only play actions stay on screen. |
 | Pause | `main.js` `setPaused`: the frame loop skips `player.step`/`game.tick` and doesn't feed the `FixedClock` (no fast-forward on resume); rendering continues behind the DOM menu (`src/client/menu.js`). P toggles it, the mouse is released while paused, and `Input.paused` makes game keys ignored. RESTART GAME needs two taps within 3 s | Gives phones a place for settings and a way to stop. The mouse has to be free to click the menu. The sim is untouched, so determinism isn't affected. |
+| Cache busting | `tools/stamp.js` (`npm run stamp`) rewrites the import map in `index.html` so every module URL carries `?v=<content hash>`; `index.html` loads `main.js` with `import` (not `src=`) so it goes through the map too. A test fails when a hash is stale | GitHub Pages caches each file for 10 min and browsers reuse fresh cached scripts even on reload, so right after a deploy a phone ran the new page with old scripts: tower bar, PAUSE, BUILD and SELL all dead. Reproduced with a real HTTP cache in Chromium, and gone with the versioned map. A missed stamp only falls back to the old caching, never breaks the game. |
+| Touch layout | Tower bar left of CROUCH in landscape (wraps rather than overflow); centred above BUILD / SELL in portrait, stats line hidden there | The bar used to have no width limit and slid off the left edge in portrait. Checked at 568×320 to 1024×768 and 360×740 to 768×1024: every button on-screen, none overlapping, every action working. |
 | Touch button taps | `setPointerCapture` is wrapped in try/catch in `touch.js` | It throws `InvalidStateError` for a pointer that is already gone (a very quick tap) and, running before the action, silently dropped the tap. Capture only matters for drags. |
 
 | Cow pathing | One shared flow field on a 2 m nav grid (`src/sim/navgrid.js`): Dijkstra outward from the cells around the milk, 8-way with no corner cutting, rebuilt only when a tower is built or sold | Cost is per grid, not per cow: 2000 cows tick in ~0.4 ms; a rebuild of the 100×100 field is ~2 ms. Towers can maze the cows, and the same field answers "how far is this cow from the milk" for targeting. |
@@ -109,7 +111,10 @@ The same tests run in Node and in the browser, with a tiny built-in harness (no 
 
 ```sh
 node tests/run.js        # or: npm test
+node tools/stamp.js      # or: npm run stamp — after changing anything in src/ (refreshes the ?v= versions in index.html; a test fails until you do)
 ```
+
+`stamp.test.js` reads files, so it runs in Node only.
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
@@ -173,9 +178,10 @@ src/client/             browser-only
   audio.js              procedural sound effects (Web Audio), positioning, throttling
   hud.js                speed/state/FPS, milk/money/wave, build bar, placement text, game-over banner
 tests/                  harness.js, *.test.js, run.js (Node), index.html (browser)
+tools/stamp.js          writes `?v=<content hash>` for every module into the import map (cache busting)
 ```
 
-`package.json` exists only so Node treats the files as ES modules and for the `npm test` shortcut. It has no dependencies.
+`package.json` exists only so Node treats the files as ES modules and for the `npm test` / `npm run stamp` shortcuts. It has no dependencies.
 
 ## Development notes
 

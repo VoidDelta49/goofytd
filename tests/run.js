@@ -4,6 +4,7 @@ import './loop.test.js';
 import './input.test.js';
 import './td.test.js';
 import './audio.test.js';
+import './stamp.test.js'; // Node only: reads index.html and the sources
 import { runAll } from './harness.js';
 
 const { failed } = await runAll();
