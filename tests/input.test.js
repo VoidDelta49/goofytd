@@ -30,7 +30,7 @@ test('stick: screen up is forward, right is right, half travel is partial speed'
   assert(half.y < -0.3 && half.y > -0.6, `half back ${half.y}`);
 });
 
-import { MouseLook, MAX_EVENT_COUNTS, SETTLE_EVENTS, DEG_PER_COUNT, viewQuaternion, rotateByQuaternion } from '../src/client/look.js';
+import { MouseLook, SPIKE_FLOOR, SPIKE_RATIO, SETTLE_EVENTS, DEG_PER_COUNT, LOCK_COOLDOWN_MS, lockRefusalAction, viewQuaternion, rotateByQuaternion } from '../src/client/look.js';
 import { yawForward, yawRight } from '../src/sim/movement.js';
 
 const DEG = Math.PI / 180;
@@ -54,10 +54,14 @@ test('look: forward/right/up of the view match the movement axes at any yaw and 
   }
 });
 
+// Feed events 1 frame (~16.7 ms) apart, as browsers deliver them under pointer lock.
+function feed(m, deltas, t0 = 0, dt = 16.7) {
+  return deltas.map(([x, y], i) => m.addMouse(x, y, t0 + i * dt));
+}
+
 test('look: counts become the exact turn, mouse right turns right, mouse down looks down', () => {
   const m = new MouseLook();
-  for (let i = 0; i < 100; i++) m.addMouse(1, 0);
-  m.addMouse(0, 10);
+  feed(m, [...Array(100)].map(() => [1, 0]).concat([[0, 10]]));
   const [dYaw, dPitch] = m.consume(2);
   assertClose(dYaw, -100 * 2 * DEG_PER_COUNT * DEG, 1e-12, 'yaw');
   assertClose(dPitch, -10 * 2 * DEG_PER_COUNT * DEG, 1e-12, 'pitch');
@@ -65,27 +69,52 @@ test('look: counts become the exact turn, mouse right turns right, mouse down lo
   assert(a === 0 && b === 0, 'consume did not clear');
 });
 
-test('look: lock-change warp events, spikes and NaN are dropped, nothing else is', () => {
+test('look: a fast flick of 1000+ counts per frame is kept in full', () => {
   const m = new MouseLook();
-  m.reset();
-  for (let i = 0; i < SETTLE_EVENTS; i++) assert(!m.addMouse(900, -900), 'warp accepted');
-  assert(!m.addMouse(MAX_EVENT_COUNTS + 1, 0) && !m.addMouse(0, -5000), 'spike accepted');
-  assert(!m.addMouse(NaN, 0) && !m.addMouse(undefined, 3), 'non-finite accepted');
-  assert(m.addMouse(MAX_EVENT_COUNTS, -7), 'limit rejected');
-  const [dYaw] = m.consume(1);
-  assertClose(dYaw, -MAX_EVENT_COUNTS * DEG_PER_COUNT * DEG, 1e-12, 'only the good event counts');
+  const flick = [[40, 0], [200, 5], [700, -10], [1500, 0], [2200, 20], [1300, 0], [400, 0], [60, 0]];
+  assert(feed(m, flick).every(Boolean), 'part of a real flick was dropped');
+  const total = flick.reduce((s, [x]) => s + x, 0);
+  assertClose(m.consume(1)[0], -total * DEG_PER_COUNT * DEG, 1e-12, 'flick total');
 });
 
-test('look: steady mouse motion gives steady turning, never sign flips (no spin)', () => {
+test('look: a flick that starts hard from rest loses only its first frame', () => {
   const m = new MouseLook();
-  let yaw = 0, prev = 0;
+  const r = feed(m, [[900, 0], [1400, 0], [1600, 0], [800, 0]], 1000);
+  assert(!r[0] && r[1] && r[2] && r[3], `accepted ${r}`);
+});
+
+test('look: a warp spike in the middle of slow motion is dropped', () => {
+  const m = new MouseLook();
+  const r = feed(m, [[4, 1], [5, 0], [-960, 540], [5, 1], [4, 0]]);
+  assert(r[0] && r[1] && !r[2] && r[3] && r[4], `accepted ${r}`);
+  assert(SPIKE_FLOOR * SPIKE_RATIO > 960, 'test assumes spike below the post-reject bar');
+});
+
+test('look: lock-change warp events and NaN are dropped', () => {
+  const m = new MouseLook();
+  m.reset();
+  for (let i = 0; i < SETTLE_EVENTS; i++) assert(!m.addMouse(900, -900, i), 'warp accepted');
+  assert(!m.addMouse(NaN, 0, 10) && !m.addMouse(undefined, 3, 20), 'non-finite accepted');
+  assert(m.addMouse(3, -7, 30), 'normal event rejected after settle');
+});
+
+test('look: steady mouse motion gives steady turning (no spin)', () => {
+  const m = new MouseLook();
+  let yaw = 0, prev = 0, t = 0;
   for (let frame = 0; frame < 600; frame++) {
-    for (let e = 0; e < 8; e++) m.addMouse(3, 0); // 1000 Hz mouse at ~125 fps
+    m.addMouse(24, 0, (t += 8));
     const [d] = m.consume(1.5);
     assert(d < 0 && (frame === 0 || Math.abs(d - prev) < 1e-12), `uneven turn at frame ${frame}`);
     prev = d; yaw += d;
   }
-  assertClose(yaw, -600 * 8 * 3 * 1.5 * DEG_PER_COUNT * DEG, 1e-9, 'total');
+  assertClose(yaw, -600 * 24 * 1.5 * DEG_PER_COUNT * DEG, 1e-9, 'total');
+});
+
+test('lock: refusals after Esc ask for a click; only repeated real refusals switch to drag-look', () => {
+  assert(lockRefusalAction({ hasApi: true, msSinceUnlock: 300, refusals: 5 }) === 'cooldown', 'cooldown');
+  assert(lockRefusalAction({ hasApi: true, msSinceUnlock: LOCK_COOLDOWN_MS + 1, refusals: 1 }) === 'retry', 'first refusal');
+  assert(lockRefusalAction({ hasApi: true, msSinceUnlock: Infinity, refusals: 2 }) === 'fallback', 'sandboxed');
+  assert(lockRefusalAction({ hasApi: false, msSinceUnlock: 0, refusals: 0 }) === 'fallback', 'no API');
 });
 
 import { loadSettings, DEFAULT_SETTINGS } from '../src/client/input.js';

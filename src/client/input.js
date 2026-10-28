@@ -5,10 +5,12 @@
 //
 // Mouse look has two capture modes:
 //  1. Pointer lock (normal): every mouse count turns the view.
-//  2. Drag-to-look, used when the browser refuses pointer lock (sandboxed
-//     embeds, Chrome's ~1 s re-lock cooldown after Esc, no API).
+//  2. Drag-to-look, only when pointer lock is truly unavailable (no API, or
+//     refused twice outside Chrome's post-Esc cooldown, e.g. a sandboxed
+//     embed). A refusal during the cooldown just asks for another click: the
+//     game never goes live with a free cursor that can click out of the window.
 
-import { MouseLook } from './look.js';
+import { LOCK_COOLDOWN_MS, MouseLook, lockRefusalAction } from './look.js';
 import { TouchControls } from './touch.js';
 
 /** Keys by `KeyboardEvent.code`, so bindings follow physical position on any layout. */
@@ -82,6 +84,9 @@ export class Input {
     this.rawMouse = params.get('raw') === '1';
     this.debug = params.has('debug');
     this.lockMode = 'none';
+    this.lockPending = false;
+    this.refusals = 0;
+    this.lastUnlockAt = -Infinity;
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
@@ -99,12 +104,15 @@ export class Input {
       this.dragging = false;
       if (this.locked) {
         this.freeLook = false;
+        this.refusals = 0;
         this.notice = '';
       } else {
+        this.lastUnlockAt = performance.now();
         this.down.clear();
       }
     });
-    // Firefox and Safari report refusals only through this event.
+    // Every refusal is handled here, once. (Chromium also rejects the
+    // request's promise for the same refusal; counting both would double it.)
     document.addEventListener('pointerlockerror', () => this.lockFailed());
     // One listener for both modes. mousemove (not pointermove) because it is
     // the event pointer lock is specified on, and it never duplicates.
@@ -127,11 +135,12 @@ export class Input {
   }
 
   async lock() {
-    if (this.locked) return;
+    if (this.locked || this.lockPending) return;
     if (typeof this.target.requestPointerLock !== 'function') {
-      this.lockFailed('This browser has no mouse capture.');
+      this.lockFailed(false);
       return;
     }
+    this.lockPending = true;
     try {
       if (this.rawMouse) {
         this.lockMode = 'raw';
@@ -141,31 +150,42 @@ export class Input {
         await this.target.requestPointerLock();
       }
     } catch (e) {
+      // Refusals arrive via 'pointerlockerror'. Only raw-mode support is handled here.
       if (this.rawMouse && e?.name === 'NotSupportedError') {
         this.lockMode = 'standard (raw unsupported)';
-        try { await this.target.requestPointerLock(); } catch { this.lockFailed(); }
-      } else {
-        this.lockFailed();
+        try { await this.target.requestPointerLock(); } catch { /* reported by pointerlockerror */ }
       }
+    } finally {
+      this.lockPending = false;
     }
   }
 
-  lockFailed(reason = 'Mouse capture was refused.') {
+  /** The browser refused pointer lock. */
+  lockFailed(hasApi = true) {
     if (this.locked) return;
-    this.freeLook = true;
-    this.notice = `${reason} Hold the left button and drag to look · click to retry · Esc to stop`;
+    const msSinceUnlock = performance.now() - this.lastUnlockAt;
+    const inCooldown = hasApi && msSinceUnlock < LOCK_COOLDOWN_MS;
+    if (!inCooldown) this.refusals++;
+    const action = lockRefusalAction({ hasApi, msSinceUnlock, refusals: this.refusals });
+    if (action === 'fallback') {
+      this.freeLook = true;
+      this.notice = 'Mouse capture is not available here. Hold the left button and drag to look · Esc to stop';
+    } else if (action === 'cooldown') {
+      this.notice = 'The browser blocks mouse capture for a second after Esc. Click again.';
+    } else {
+      this.notice = 'Mouse capture was refused. Click again.';
+    }
   }
 
   onPointerDown(e) {
     this.lastPointerType = e.pointerType;
     if (e.pointerType !== 'mouse' || this.locked || !this.freeLook || e.button !== 0) return;
     this.dragging = true;
-    this.look.reset();
-    this.look.settle = 0; // no cursor warp without a lock
+    this.look.reset(0); // no cursor warp without a lock
   }
 
   onMouseMove(e) {
-    if (this.locked || this.dragging) this.look.addMouse(e.movementX, e.movementY);
+    if (this.locked || this.dragging) this.look.addMouse(e.movementX, e.movementY, e.timeStamp);
   }
 
   onWheel(e) {

@@ -11,12 +11,16 @@
 // Angles: yaw 0 looks down -Z, positive yaw turns left; pitch positive looks up.
 
 /**
- * A single mousemove never legitimately carries more than this many counts:
- * a hard flick on a 16000 DPI mouse at 1000 Hz is ~100. Bigger values are the
- * cursor warping to the lock centre, a compositor (Wayland/XWayland) jump, or
- * an absolute-position device misreported as relative.
+ * Spike filter. Browsers deliver mousemove once per frame with the whole
+ * frame's motion summed, so a real fast flick is 1000+ counts per event and
+ * no fixed cap is safe. Real motion ramps up over a few frames; a bogus
+ * delta (cursor warp, compositor jump) appears out of nowhere. So an event
+ * is a spike only if it is above SPIKE_FLOOR counts AND more than
+ * SPIKE_RATIO times the previous event within SPIKE_WINDOW_MS.
  */
-export const MAX_EVENT_COUNTS = 250;
+export const SPIKE_FLOOR = 400;
+export const SPIKE_RATIO = 6;
+export const SPIKE_WINDOW_MS = 100;
 
 /**
  * Mouse events after a pointer-lock change to throw away. Chromium and
@@ -34,30 +38,47 @@ export class MouseLook {
     this.yawRad = 0; // accumulated radians from touch
     this.pitchRad = 0;
     this.settle = 0;
+    this.prevMag = 0;
+    this.prevTime = -Infinity;
     this.stats = { accepted: 0, rejected: 0, last: [0, 0], maxAbs: 0 };
   }
 
   /** Call when pointer lock is gained or lost: drops pending input and the warp events. */
-  reset() {
+  reset(settleEvents = SETTLE_EVENTS) {
     this.dx = this.dy = this.yawRad = this.pitchRad = 0;
-    this.settle = SETTLE_EVENTS;
+    this.settle = settleEvents;
+    this.prevMag = 0;
+    this.prevTime = -Infinity;
   }
 
-  /** One mousemove's movementX/Y. Returns whether it was accepted. */
-  addMouse(mx, my) {
+  /**
+   * One mousemove's movementX/Y at event time `t` (ms). Returns whether it
+   * was accepted.
+   */
+  addMouse(mx, my, t) {
     const s = this.stats;
     s.last = [mx, my];
-    if (Number.isFinite(mx) && Number.isFinite(my)) s.maxAbs = Math.max(s.maxAbs, Math.abs(mx), Math.abs(my));
+    if (!Number.isFinite(mx) || !Number.isFinite(my)) {
+      s.rejected++;
+      return false;
+    }
+    const mag = Math.max(Math.abs(mx), Math.abs(my));
+    s.maxAbs = Math.max(s.maxAbs, mag);
     if (this.settle > 0) {
       this.settle--;
       s.rejected++;
       return false;
     }
-    if (!Number.isFinite(mx) || !Number.isFinite(my) ||
-        Math.abs(mx) > MAX_EVENT_COUNTS || Math.abs(my) > MAX_EVENT_COUNTS) {
+    const prev = t - this.prevTime <= SPIKE_WINDOW_MS ? this.prevMag : 0;
+    this.prevTime = t;
+    if (mag > SPIKE_FLOOR && mag > SPIKE_RATIO * prev) {
+      // Remember it capped, so a real flick that starts hard loses only its
+      // first frame, while a lone huge spike can't vouch for another one.
+      this.prevMag = SPIKE_FLOOR;
       s.rejected++;
       return false;
     }
+    this.prevMag = mag;
     this.dx += mx;
     this.dy += my;
     s.accepted++;
@@ -82,6 +103,27 @@ export class MouseLook {
     this.dx = this.dy = this.yawRad = this.pitchRad = 0;
     return out;
   }
+}
+
+/**
+ * Chrome refuses a pointer-lock request for about a second after the user
+ * leaves the lock with Esc. Refusals inside this window are that cooldown.
+ */
+export const LOCK_COOLDOWN_MS = 1500;
+
+/**
+ * What to do when the browser refuses pointer lock:
+ *  'cooldown' — just after an unlock: ask for another click, change nothing else
+ *  'retry'    — first unexplained refusal: ask for another click
+ *  'fallback' — no API, or refused twice outside the cooldown (sandboxed
+ *               embed): switch to hold-and-drag look
+ * The game never goes "live" with a free cursor unless it truly has to,
+ * because a free cursor clicks out of the window.
+ */
+export function lockRefusalAction({ hasApi, msSinceUnlock, refusals }) {
+  if (!hasApi) return 'fallback';
+  if (msSinceUnlock < LOCK_COOLDOWN_MS) return 'cooldown';
+  return refusals >= 2 ? 'fallback' : 'retry';
 }
 
 /**
