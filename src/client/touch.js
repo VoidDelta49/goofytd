@@ -153,6 +153,11 @@ export class TouchControls {
       case 'sensDown': this.input.adjustTouchSensitivity(-0.05); break;
       case 'sensUp': this.input.adjustTouchSensitivity(0.05); break;
       case 'fullscreen': this.toggleFullscreen(); break;
+      // Building: BUILD cycles the tower type (then off), PLACE builds it, or
+      // sells the tower you're looking at when not building.
+      case 'build': this.input.handlers.cycleTower?.(); break;
+      case 'place': this.input.handlers.placeOrSell?.(); break;
+      case 'wave': this.input.handlers.nextWave?.(); break;
     }
     this.syncButtons();
   }

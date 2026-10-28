@@ -45,6 +45,29 @@
     }
     #hud [data-hud=hint][hidden] { display: none; }
     #hud [data-hud=hint] b { font-size: 26px; }
+    #hud .td {
+      position: absolute; right: calc(14px + env(safe-area-inset-right)); top: calc(10px + env(safe-area-inset-top));
+      text-align: right; white-space: pre;
+    }
+    #hud .milk { width: 220px; height: 12px; margin-left: auto; border: 2px solid #fffc; border-radius: 7px; background: #0005; overflow: hidden; }
+    #hud [data-hud=milkbar] { height: 100%; width: 100%; background: #f6f6ff; transition: width 0.2s; }
+    #hud [data-hud=place] {
+      position: absolute; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); white-space: nowrap;
+    }
+    #hud [data-hud=place].bad { color: #ff8a8a; }
+    #hud [data-hud=buildbar] {
+      position: absolute; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+      display: flex; gap: 8px; white-space: nowrap;
+    }
+    #hud [data-hud=buildbar] .slot { padding: 3px 9px; border-radius: 6px; background: #0006; border: 2px solid transparent; }
+    #hud [data-hud=buildbar] .slot.on { border-color: #ffd84d; background: #0009; }
+    #hud [data-hud=buildbar] .slot.poor .cost { color: #ff8a8a; }
+    #hud [data-hud=buildbar] .cost { color: #ffd84d; }
+    #hud [data-hud=banner] {
+      position: absolute; left: 50%; top: 32%; transform: translateX(-50%); white-space: pre; text-align: center;
+      font-size: 24px; font-weight: 700; padding: 10px 18px; border-radius: 10px; background: #000b;
+    }
+    #hud [data-hud=banner]:empty, #hud [data-hud=place]:empty { display: none; }
     #hud kbd {
       padding: 0 6px; border: 1px solid #fff8; border-radius: 4px; background: #0003; font: inherit;
     }
@@ -88,9 +111,19 @@
     #touch [data-touch=autoHop] { right: calc(104px + env(safe-area-inset-right)); }
     #touch [data-touch=sensUp] { right: calc(150px + env(safe-area-inset-right)); }
     #touch [data-touch=sensDown] { right: calc(196px + env(safe-area-inset-right)); }
+    #touch [data-touch=wave] { right: calc(242px + env(safe-area-inset-right)); }
+    #touch [data-touch=build], #touch [data-touch=place] {
+      width: 62px; height: 62px; right: calc(28px + env(safe-area-inset-right)); font-size: 11px;
+    }
+    #touch [data-touch=build] { bottom: calc(196px + env(safe-area-inset-bottom)); }
+    #touch [data-touch=place] { bottom: calc(128px + env(safe-area-inset-bottom)); }
+    body.touch-device #hud .td { top: calc(58px + env(safe-area-inset-top)); }
     @media (max-width: 700px), (max-height: 450px) {
       #hud .readout { font-size: 12px; }
       #hud [data-hud=speed] { font-size: 20px; }
+      #hud .td { font-size: 12px; }
+      #hud .milk { width: 140px; }
+      #hud [data-hud=buildbar] .slot kbd { display: none; }
     }
   </style>
 </head>
@@ -101,15 +134,24 @@
       <div data-hud="speed">0.00 m/s</div>
       <div data-hud="info"></div>
     </div>
+    <div class="td">
+      <div class="milk"><div data-hud="milkbar"></div></div>
+      <div data-hud="td"></div>
+    </div>
     <div class="crosshair"></div>
+    <div data-hud="place"></div>
+    <div data-hud="buildbar"></div>
+    <div data-hud="banner"></div>
     <div data-hud="notice"></div>
     <div data-hud="hint">
       <b class="desk-only">Click to play</b>
       <b class="touch-only">Tap to play</b>
       <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
+      <div class="desk-only"><kbd>1</kbd>–<kbd>3</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>X</kbd> sell · <kbd>N</kbd> next wave</div>
       <div class="desk-only"><kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
       <div class="touch-only">Left thumb: move · drag the right side to look</div>
       <div class="touch-only">Drag from the jump button to steer mid-air</div>
+      <div class="touch-only">BUILD picks a tower · PLACE builds it (or sells the tower you look at)</div>
     </div>
   </div>
   <div id="touch" hidden>
@@ -122,6 +164,9 @@
     <button class="small" data-touch="autoHop" aria-label="Toggle auto-hop">HOP</button>
     <button class="small" data-touch="respawn" aria-label="Respawn">R</button>
     <button class="small" data-touch="fullscreen" aria-label="Fullscreen">⛶</button>
+    <button data-touch="build" aria-label="Pick a tower to build">BUILD</button>
+    <button data-touch="place" aria-label="Build, or sell the tower you look at">PLACE</button>
+    <button class="small" data-touch="wave" aria-label="Start the next wave">N</button>
   </div>
   <script type="module" src="./src/main.js"></script>
 </body>

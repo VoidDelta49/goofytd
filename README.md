@@ -33,7 +33,13 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Pointer-lock refusals | Within 1.5 s of leaving the lock (Chrome's cooldown) or on a first refusal: stay paused and ask for another click. Drag-to-look only with no API or two refusals outside the cooldown | Auto-switching to drag-look on any refusal made the game flip in and out of capture and left a free cursor that clicked out of the window. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
-Still open: collision approach for thousands of cows (likely a uniform grid), WebGPU renderer, multiplayer networking model. JS floating-point maths (`Math.sin` etc.) is not guaranteed bit-identical across browsers, which matters for lockstep PvP; decide when PvP is scoped.
+| Cow pathing | One shared flow field on a 2 m nav grid (`src/sim/navgrid.js`): Dijkstra outward from the cells around the milk, 8-way with no corner cutting, rebuilt only when a tower is built or sold | Cost is per grid, not per cow: 2000 cows tick in ~0.4 ms; a rebuild of the 100×100 field is ~2 ms. Towers can maze the cows, and the same field answers "how far is this cow from the milk" for targeting. |
+| Tower placement | Towers snap to the nav grid (odd footprints centre on a cell, even on a corner). Refused on level geometry, other towers, cows, the player, the field edge, too little money, or if any spawner or cow would lose every path to the milk | Mazing is the fun part of TD, sealing the milk off would break it. The path check is a yes/no BFS (~1.5 ms with 2000 cows), and the build preview reruns it only when the aim, grid or money changes, or every 120 ms. |
+| Towers are modular | `src/sim/towers.js`: a tower type is one `defineTower({...})` call: stats, `targeting` (`first`/`nearest`/`strongest` or a function), `attack` (`hitscan`/`lob`, a function, or null for a wall) and `parts` (coloured boxes to draw). The game, build bar, hotkeys and renderer all read the registry | Adding a tower touches one file; a test proves a custom tower with its own attack function works with no other changes. |
+| Cows | Types in a `defineCow` registry (`src/sim/cows.js`); live cows in flat typed arrays with swap-remove; drawn as one `InstancedMesh` | Thousands of cows without per-cow objects or draw calls. Nothing holds a cow slot across ticks (shells aim at a point), so swap-remove is safe. |
+| Sim randomness | Seeded `mulberry32` (`src/sim/rng.js`), never `Math.random`; sim maths uses `+ - * /` and `sqrt` only (atan2 for model yaw lives in the renderer) | Same seed and inputs give the same match: needed for replays and lockstep PvP. Tested. |
+
+Still open: cow-vs-cow and cow-vs-player collision (cows currently overlap; likely a uniform grid), WebGPU renderer, multiplayer networking model. JS floating-point maths (`Math.sin` etc.) is not guaranteed bit-identical across browsers, which matters for lockstep PvP; decide when PvP is scoped.
 
 Record each decision here, with a one-line reason, once it is made.
 
@@ -62,6 +68,12 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | [ and ] | Mouse sensitivity (saved in the browser) |
 | \\ | Reset sensitivity to defaults |
 | Esc | Release the mouse |
+| 1 2 3 | Pick a tower to build (Milk Squirter, Butter Mortar, Hay Bale); the same key again stops building |
+| Left click or E | Build the green ghost (red = not allowed, the reason shows under the crosshair) |
+| Q or right click | Stop building |
+| X | Sell the tower you're looking at (70% back) |
+| N | Start the next wave now (the playground only has manual waves) |
+| Enter | Restart after the cows drink all the milk |
 
 If the browser refuses mouse capture (for example inside a sandboxed embed), a notice appears and you look by holding the left button and dragging instead.
 
@@ -75,8 +87,11 @@ Touch (phones and tablets; appears on the first tap):
 | DUCK | Crouch toggle |
 | S− / S+ | Look sensitivity (degrees per pixel, saved in the browser) |
 | HOP, R, ⛶ | Auto-hop toggle, respawn, fullscreen (also locks landscape where the browser allows) |
+| BUILD | Cycle the tower to build (then off) |
+| PLACE | Build the ghost, or sell the tower you're looking at when not building |
+| N | Start the next wave now |
 
-Movement tunables can be changed live from the browser console, e.g. `goofytd.cfg.airAccel = 20`.
+Movement tunables can be changed live from the browser console, e.g. `goofytd.cfg.airAccel = 20`; the match too: `goofytd.game.money = 9999`, `goofytd.game.startWave()`.
 
 ## Tests
 
@@ -88,7 +103,7 @@ node tests/run.js        # or: npm test
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
-They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation).
+They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation), and tower defence: spawners reach the milk on every level, cows walk the flow field and drink, waves start and grow, losing, grid snapping, every placement refusal, mazing without sealing the milk, cows never walking through towers, towers being solid for the player and selling, the sell raycast, squirter kills and bounties, mortar splash/lead/min range, a custom tower type plugging in, same-seed determinism, and a 2000-cow / 40-tower benchmark (prints ms per tick).
 
 ## Movement model
 
@@ -100,7 +115,25 @@ They cover collision sweeps (including tunnelling), acceleration, friction, wall
 - Step-slide climbs ledges up to 0.45 m; walking down stairs snaps to the ground instead of going airborne.
 - Crouching shrinks the hull to 1.2 m. In the air the legs tuck up, so a **crouch jump** reaches 0.6 m higher.
 
-The default level is the open field. The movement test level (`?map=playground`) has a step-height row, stairs to a 3 m platform, a 1.1 m ledge (plain jump), a 1.7 m ledge (crouch jump only), a crawl tunnel, a pillar-lined bunny-hop runway, and the milk.
+The default level is the open field: four cow spawners (one per side) and waves that start on their own (first after 20 s, then 25 s after each wave finishes spawning; each wave has 4 more cows with 15% more HP). The movement test level (`?map=playground`) has a step-height row, stairs to a 3 m platform, a 1.1 m ledge (plain jump), a 1.7 m ledge (crouch jump only), a crawl tunnel, a pillar-lined bunny-hop runway, and the milk.
+
+## Adding a tower
+
+One call in `src/sim/towers.js` (field reference in the `defineTower` doc comment):
+
+```js
+defineTower({
+  id: 'cheese-cannon', name: 'Cheese Cannon', blurb: 'big slow hits', cost: 80,
+  footprint: 1, height: 1.4, attack: 'hitscan', targeting: 'strongest',
+  range: 18, interval: 1.5, damage: 40, muzzle: [0, 1.2, -1], shotColor: 0xffc23a,
+  parts: [
+    { min: [-0.9, 0, -0.9], max: [0.9, 1.0, 0.9], color: 0xe8a33a },
+    { min: [-0.2, 1.0, -1.0], max: [0.2, 1.4, 0.2], color: 0x333333, aim: true },
+  ],
+});
+```
+
+It shows up in the build bar with the next number key. A new behaviour is an `attack(game, tower, cowSlot)` or `targeting(game, tower)` function, either inline or added to `ATTACKS` / `TARGETING`. Cows work the same way with `defineCow` in `src/sim/cows.js`.
 
 ## Layout
 
@@ -114,12 +147,19 @@ src/sim/                pure simulation, no three.js / DOM
   vec3.js               small vector type
   collision.js          AABB world, swept-box queries
   movement.js           pmove-style movement tick
+  navgrid.js            cow nav grid, flow field (Dijkstra), reachability check for placement
+  cows.js               cow type registry + structure-of-arrays cow pool
+  towers.js             tower type registry, targeting strategies, attacks
+  game.js               the match: spawners, waves, cows, towers, money, milk, placement rules
+  rng.js                seeded PRNG
 src/client/             browser-only
   render.js             three.js scene, world-UV box meshes, grid texture, lights
   look.js               mouse-delta filter (spikes, Firefox echoes)/accumulator, view quaternion (pure, tested)
   input.js              pointer lock + drag-look fallback, keyboard, bindings, settings
   touch.js              touch stick, drag-look and buttons
-  hud.js                speed/state/FPS overlay
+  build.js              build mode: crosshair -> ground point, placement preview, sell target
+  td-render.js          instanced cows, tower models from `parts`, ghost, tracers, shells, puffs
+  hud.js                speed/state/FPS, milk/money/wave, build bar, placement text, game-over banner
 tests/                  harness.js, *.test.js, run.js (Node), index.html (browser)
 ```
 

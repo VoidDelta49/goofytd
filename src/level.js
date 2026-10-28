@@ -70,14 +70,16 @@ export function movementPlayground() {
     for (const x of [-24, 24]) b.push(block(S.Pillar, [x - 0.5, 0, z - 0.5], [x + 0.5, 5, z + 0.5]));
   }
 
-  return { blocks: b, spawn: Vec3.ZERO, spawnYaw: 0 };
+  // One cow spawner at the far end of the hop runway. Waves start on N only:
+  // this level is for movement first.
+  return { blocks: b, spawn: Vec3.ZERO, spawnYaw: 0, spawners: [{ x: 0, z: -70 }], autoWaves: false };
 }
 
 /**
  * Open field for building and testing tower defence: 200 m of flat floor,
  * the milk at the centre, and a 3 m boundary wall (a crouch jump peaks
  * near 1.8 m, so nothing gets out). The player spawns 10 m south of the
- * milk, facing it.
+ * milk, facing it. Four cow spawners, one per side.
  */
 export function openField() {
   const S = Surface;
@@ -90,7 +92,10 @@ export function openField() {
     block(S.Wall, [half, 0, -half], [half + 1, wallH, half]),
     block(S.Milk, [-1.5, 0, -1.5], [1.5, 4.5, 1.5]),
   ];
-  return { blocks: b, spawn: v3(0, 0, 10), spawnYaw: 0, halfSize: half };
+  // Cow spawners near the middle of each wall, 10 m in.
+  const e = half - 10;
+  const spawners = [{ x: 0, z: -e }, { x: e, z: 0 }, { x: 0, z: e }, { x: -e, z: 0 }];
+  return { blocks: b, spawn: v3(0, 0, 10), spawnYaw: 0, halfSize: half, spawners, autoWaves: true };
 }
 
 /** Levels by URL name: `?map=playground` opens the movement playground. */

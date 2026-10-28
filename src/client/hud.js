@@ -1,6 +1,7 @@
 // DOM overlay: speed readout, movement state, FPS and controls hint.
 
 import { horizontalSpeed } from '../sim/movement.js';
+import { SELL_REFUND, TOWER_TYPES } from '../sim/towers.js';
 
 export class Hud {
   constructor(root) {
@@ -15,12 +16,19 @@ export class Hud {
       this.debugEl.style.cssText = 'position:absolute;left:14px;bottom:10px;margin:0;font:12px/1.3 monospace;background:#000a;padding:6px 8px;border-radius:6px';
       root.appendChild(this.debugEl);
     }
+    this.tdEl = root.querySelector('[data-hud=td]');
+    this.milkBar = root.querySelector('[data-hud=milkbar]');
+    this.buildBar = root.querySelector('[data-hud=buildbar]');
+    this.placeEl = root.querySelector('[data-hud=place]');
+    this.bannerEl = root.querySelector('[data-hud=banner]');
+    this.buildSlots = [];
     this.frameTimes = [];
     this.lastText = 0;
   }
 
   /** @param {number} now ms timestamp @param {number} frameDt seconds */
-  update(now, frameDt, player, cfg, input) {
+  update(now, frameDt, player, cfg, input, game, build) {
+    this.updateTd(now, game, build);
     this.frameTimes.push(frameDt);
     if (this.frameTimes.length > 60) this.frameTimes.shift();
     this.hintEl.hidden = input.active;
@@ -53,4 +61,51 @@ export class Hud {
         : ` · sens ${input.settings.sensitivity.toFixed(1)}`) +
       ` · ${avg > 0 ? Math.round(1 / avg) : 0} fps`;
   }
+
+  /** Milk, money, wave, build bar and placement feedback. Cheap: only touches the DOM when text changes. */
+  updateTd(now, game, build) {
+    const ids = Object.keys(TOWER_TYPES);
+    if (this.buildSlots.length !== ids.length) {
+      this.buildBar.replaceChildren();
+      this.buildSlots = ids.map((id, k) => {
+        const el = document.createElement('div');
+        el.className = 'slot';
+        const t = TOWER_TYPES[id];
+        el.innerHTML = `<kbd>${k + 1}</kbd> ${t.name} <span class="cost">${t.cost}</span>`;
+        el.title = t.blurb;
+        this.buildBar.appendChild(el);
+        return { id, el, cost: t.cost };
+      });
+    }
+    for (const s of this.buildSlots) {
+      s.el.classList.toggle('on', build.selected === s.id);
+      s.el.classList.toggle('poor', game.money < s.cost);
+    }
+
+    const pct = Math.max(0, game.milk / game.cfg.milk) * 100;
+    this.milkBar.style.width = `${pct}%`;
+    const next = game.nextWaveIn !== null
+      ? `next in ${Math.ceil(game.nextWaveIn)} s`
+      : game.spawning ? 'incoming' : game.cows.count ? 'mooing' : 'N: next wave';
+    setText(this.tdEl,
+      `milk ${Math.ceil(game.milk)} · moolah ${game.money}\n` +
+      `wave ${game.wave} (${next}) · cows ${game.cows.count} · kills ${game.kills}`);
+
+    let place = '';
+    if (build.message && now < build.messageUntil) place = build.message;
+    else if (build.preview) {
+      const p = build.preview;
+      place = p.ok ? `${p.type.name}: ${p.type.cost} · click/E to build · Q cancels` : `${p.type.name}: ${p.reason}`;
+    } else if (build.lookTower) {
+      const t = build.lookTower;
+      place = `${t.def.name} · ${t.kills} kills · X sells for ${Math.floor(t.spent * SELL_REFUND)}`;
+    }
+    setText(this.placeEl, place);
+    this.placeEl.classList.toggle('bad', !!build.preview && !build.preview.ok);
+    setText(this.bannerEl, game.lost ? `THE COWS DRANK ALL THE MILK\nwave ${game.wave} · ${game.kills} kills · Enter to try again` : '');
+  }
+}
+
+function setText(el, text) {
+  if (el.textContent !== text) el.textContent = text;
 }

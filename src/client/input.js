@@ -29,7 +29,16 @@ export const BINDINGS = {
   sensDown: ['BracketLeft'],
   sensUp: ['BracketRight'],
   sensReset: ['Backslash'],
+  // Building. Digit1..Digit9 pick a tower (handled in onKey).
+  place: ['KeyE'],
+  sell: ['KeyX'],
+  cancelBuild: ['KeyQ'],
+  nextWave: ['KeyN'],
+  restart: ['Enter'],
 };
+
+/** Actions forwarded to `Input.handlers` (set by main.js) on key down. */
+const HANDLED_ACTIONS = ['place', 'sell', 'cancelBuild', 'nextWave', 'restart'];
 
 const SETTINGS_KEY = 'goofytd.settings';
 
@@ -105,11 +114,22 @@ export class Input {
     this.lockPending = false;
     this.refusals = 0;
     this.lastUnlockAt = -Infinity;
+    /** Game actions (building, waves) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, selectTower(n), cycleTower }. */
+    this.handlers = {};
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
 
     target.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+    // Clicks while captured build (left) or cancel building (right).
+    // mousedown, not pointerdown: a second button pressed while the first
+    // is held fires no pointerdown.
+    document.addEventListener('mousedown', (e) => {
+      if (!this.locked) return;
+      if (e.button === 0) this.handlers.place?.();
+      if (e.button === 2) this.handlers.cancelBuild?.();
+    });
+    target.addEventListener('contextmenu', (e) => e.preventDefault());
     target.addEventListener('pointerup', () => { this.dragging = false; });
     target.addEventListener('pointercancel', () => { this.dragging = false; });
     target.addEventListener('click', () => {
@@ -255,6 +275,7 @@ export class Input {
     }
     if (!this.active) {
       if (isDown && is('respawn')) this.player.pending.respawn = true;
+      if (isDown && is('restart')) this.handlers.restart?.();
       return;
     }
     e.preventDefault();
@@ -263,6 +284,9 @@ export class Input {
       this.down.add(e.code);
       if (is('jump')) this.player.pending.jumpPressed = true;
       if (is('respawn')) this.player.pending.respawn = true;
+      const digit = /^Digit([1-9])$/.exec(e.code);
+      if (digit) this.handlers.selectTower?.(Number(digit[1]));
+      for (const a of HANDLED_ACTIONS) if (is(a)) this.handlers[a]?.();
       if (is('fullscreen')) this.toggleFullscreen();
       if (is('autoHop')) {
         this.cfg.autoHop = !this.cfg.autoHop;
