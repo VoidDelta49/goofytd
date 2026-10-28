@@ -28,6 +28,7 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Tick rate | Fixed 64 Hz simulation, camera interpolated between ticks | Frame-rate independent movement; matches Source/CS tick rates. |
 | Default map | Open 200 m field, milk at the centre, 3 m boundary wall; movement playground at `?map=playground` | Empty space to build and test towers; the playground stays for tuning movement. |
 | Mouse look | Pointer lock, with drag-to-look when the browser refuses the lock | A refused lock (sandboxed embed, Chrome's re-lock cooldown after Esc) used to leave the mouse unable to look, silently. |
+| Mouse capture mode | Standard pointer lock by default; raw/unadjusted is opt-in with `?raw=1`; mouse deltas over 300 counts and the first event after a lock change are discarded | Erratic camera spin reported on one machine; raw input is the riskiest path on Linux. Add `?debug` to show live mouse stats. Root cause not yet confirmed. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
 Still open: collision approach for thousands of cows (likely a uniform grid), WebGPU renderer, multiplayer networking model. JS floating-point maths (`Math.sin` etc.) is not guaranteed bit-identical across browsers, which matters for lockstep PvP; decide when PvP is scoped.

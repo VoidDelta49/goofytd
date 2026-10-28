@@ -48,6 +48,20 @@ function saveSettings(settings) {
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
+/**
+ * One mousemove event never legitimately moves more than this many counts
+ * (a fast flick on a 16000 DPI mouse is ~100). Larger values are the pointer
+ * warping to the lock centre or a driver spike, not the hand.
+ */
+export const MAX_MOUSE_DELTA = 300;
+
+/** Returns [dx, dy] if the event is a real movement, or null to discard it. */
+export function sanitizeMouseDelta(dx, dy) {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
+  if (Math.abs(dx) > MAX_MOUSE_DELTA || Math.abs(dy) > MAX_MOUSE_DELTA) return null;
+  return [dx, dy];
+}
+
 export class Input {
   /**
    * @param {HTMLElement} target the game canvas; receives pointer lock and touches
@@ -68,6 +82,12 @@ export class Input {
     /** Why mouse capture failed; shown by the HUD. */
     this.notice = '';
     this.lastPointerType = 'mouse';
+    const params = new URLSearchParams(location.search);
+    /** Raw (unaccelerated) lock is opt-in with ?raw=1: it is the riskiest path on Linux. */
+    this.rawMouse = params.get('raw') === '1';
+    this.debug = params.has('debug');
+    /** Diagnostics for ?debug: what the browser actually reports. */
+    this.stats = { events: 0, discarded: 0, last: [0, 0], maxAbs: 0, perSec: 0, _count: 0, _t: performance.now(), mode: 'none' };
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
@@ -82,6 +102,7 @@ export class Input {
     });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === target;
+      this.skipNextMove = true; // first event after a lock change can be the warp to centre
       if (this.locked) {
         this.freeLook = false;
         this.notice = '';
@@ -115,15 +136,20 @@ export class Input {
       return;
     }
     try {
-      // Raw, unaccelerated mouse input where supported (Chromium on Windows/macOS).
-      await this.target.requestPointerLock({ unadjustedMovement: true });
-    } catch (e) {
-      if (e?.name !== 'NotSupportedError') {
-        this.lockFailed();
-        return;
+      if (this.rawMouse) {
+        this.stats.mode = 'raw';
+        await this.target.requestPointerLock({ unadjustedMovement: true });
+      } else {
+        this.stats.mode = 'standard';
+        await this.target.requestPointerLock();
       }
-      // No raw input on this platform (e.g. Linux): take the ordinary lock.
-      try { await this.target.requestPointerLock(); } catch { this.lockFailed(); }
+    } catch (e) {
+      if (this.rawMouse && e?.name === 'NotSupportedError') {
+        this.stats.mode = 'standard (raw unsupported)';
+        try { await this.target.requestPointerLock(); } catch { this.lockFailed(); }
+      } else {
+        this.lockFailed();
+      }
     }
   }
 
@@ -151,6 +177,16 @@ export class Input {
   }
 
   turnByMouse(dx, dy) {
+    const st = this.stats;
+    st.events++; st._count++;
+    const now = performance.now();
+    if (now - st._t >= 1000) { st.perSec = Math.round((st._count * 1000) / (now - st._t)); st._count = 0; st._t = now; }
+    st.last = [dx, dy];
+    st.maxAbs = Math.max(st.maxAbs, Math.abs(dx) || 0, Math.abs(dy) || 0);
+    if (this.skipNextMove) { this.skipNextMove = false; st.discarded++; return; }
+    const d = sanitizeMouseDelta(dx, dy);
+    if (!d) { st.discarded++; return; }
+    [dx, dy] = d;
     const radPerCount = (this.settings.sensitivity * 0.022 * Math.PI) / 180;
     // Mouse right turns right (negative yaw); mouse down looks down.
     this.player.look(-dx * radPerCount, -dy * radPerCount);

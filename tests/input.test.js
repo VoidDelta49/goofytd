@@ -29,3 +29,14 @@ test('stick: screen up is forward, right is right, half travel is partial speed'
   const half = stickVector(0, STICK_RADIUS / 2);
   assert(half.y < -0.3 && half.y > -0.6, `half back ${half.y}`);
 });
+
+import { MAX_MOUSE_DELTA, sanitizeMouseDelta } from '../src/client/input.js';
+
+test('mouse: normal deltas pass, spikes and non-finite values are discarded', () => {
+  const ok = sanitizeMouseDelta(-12, 7);
+  assert(ok && ok[0] === -12 && ok[1] === 7, 'normal delta altered');
+  assert(sanitizeMouseDelta(MAX_MOUSE_DELTA, 0) !== null, 'limit itself should pass');
+  assert(sanitizeMouseDelta(MAX_MOUSE_DELTA + 1, 0) === null, 'x spike passed');
+  assert(sanitizeMouseDelta(0, -5000) === null, 'y spike passed');
+  assert(sanitizeMouseDelta(NaN, 0) === null && sanitizeMouseDelta(undefined, 1) === null, 'non-finite passed');
+});

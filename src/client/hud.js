@@ -9,6 +9,12 @@ export class Hud {
     this.infoEl = root.querySelector('[data-hud=info]');
     this.hintEl = root.querySelector('[data-hud=hint]');
     this.noticeEl = root.querySelector('[data-hud=notice]');
+    this.debugEl = null;
+    if (new URLSearchParams(location.search).has('debug')) {
+      this.debugEl = document.createElement('pre');
+      this.debugEl.style.cssText = 'position:absolute;left:14px;bottom:10px;margin:0;font:12px/1.3 monospace;background:#000a;padding:6px 8px;border-radius:6px';
+      root.appendChild(this.debugEl);
+    }
     this.frameTimes = [];
     this.lastText = 0;
   }
@@ -24,6 +30,13 @@ export class Hud {
     if (now - this.lastText < 66) return;
     this.lastText = now;
 
+    if (this.debugEl) {
+      const st = input.stats;
+      this.debugEl.textContent =
+        `mouse debug (?debug)\nlock ${input.locked} · mode ${st.mode} · dpr ${devicePixelRatio}\n` +
+        `last dx,dy ${st.last.join(', ')}\nevents ${st.events} (${st.perSec}/s) · discarded ${st.discarded}\n` +
+        `max |delta| ${st.maxAbs}\nyaw ${player.yaw.toFixed(3)} pitch ${player.pitch.toFixed(3)}\n${navigator.userAgent.slice(0, 90)}`;
+    }
     const s = player.state;
     const speed = horizontalSpeed(s);
     const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
