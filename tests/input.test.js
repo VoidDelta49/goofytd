@@ -125,3 +125,67 @@ test('settings: corrupt or out-of-range stored values fall back to defaults', ()
   assert(loadSettings(store('not json')).touchSensitivity === DEFAULT_SETTINGS.touchSensitivity, 'corrupt not handled');
   assert(loadSettings(store('{"sensitivity":3.2}')).sensitivity === 3.2, 'valid sens dropped');
 });
+
+// Real Firefox recording (Linux X11 UA, DPR 1.25): each frame is a real delta
+// then an echo carrying the cursor's offset from the lock anchor.
+import firefoxEcho from './fixtures/firefox-echo.json' with { type: 'json' };
+
+/** Feed [x, y, frame] rows, consuming once per frame; returns per-frame counts. */
+function replayFrames(m, rows) {
+  const out = [];
+  let frame = rows[0][2];
+  rows.forEach(([x, y, f], i) => {
+    if (f !== frame) { out.push(m.consume(1).map((r) => -r / ((DEG_PER_COUNT * Math.PI) / 180))); frame = f; }
+    m.addMouse(x, y, i * 8);
+  });
+  out.push(m.consume(1).map((r) => -r / ((DEG_PER_COUNT * Math.PI) / 180)));
+  return out;
+}
+
+test('look: Firefox echo events are dropped, real motion is kept exactly', () => {
+  const rows = firefoxEcho.events;
+  // Ground truth: the first event of every frame is the real delta.
+  let tx = 0, ty = 0, maxReal = 0, seen = new Set();
+  for (const [x, y, f] of rows) {
+    if (seen.has(f)) continue;
+    seen.add(f); tx += x; ty += y; maxReal = Math.max(maxReal, Math.abs(x), Math.abs(y));
+  }
+  const m = new MouseLook();
+  const frames = replayFrames(m, rows);
+  assert(m.stats.echo, 'echo mode not detected');
+  const sx = frames.reduce((a, f) => a + f[0], 0), sy = frames.reduce((a, f) => a + f[1], 0);
+  assertClose(sx, tx, 1e-6, 'total x vs real motion');
+  assertClose(sy, ty, 1e-6, 'total y vs real motion');
+  // After detection (3rd frame) and its one correction frame, no frame jumps.
+  const worst = Math.max(...frames.slice(4).map(([x, y]) => Math.max(Math.abs(x), Math.abs(y))));
+  assert(worst <= maxReal, `frame jumped ${worst} counts (largest real delta ${maxReal})`);
+  assertClose(m.stats.echoes, rows.length - seen.size, 0, 'echo count');
+});
+
+test('look: real hand motion never trips the echo filter', () => {
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32) - 0.5;
+  const streams = {
+    sine: Array.from({ length: 400 }, (_, i) => [Math.round(40 * Math.sin(i / 9)), Math.round(25 * Math.cos(i / 6))]),
+    accelFlick: Array.from({ length: 30 }, (_, i) => [Math.round(1.25 ** i), Math.round(1.2 ** i)]),
+    noise: Array.from({ length: 2000 }, () => [Math.round(rnd() * 60), Math.round(rnd() * 60)]),
+    reversals: Array.from({ length: 300 }, (_, i) => [i % 2 ? 50 : -50, i % 3 ? 20 : -40]),
+    slowJitter: Array.from({ length: 2000 }, () => [Math.round(rnd() * 4), Math.round(rnd() * 4)]),
+  };
+  for (const [name, deltas] of Object.entries(streams)) {
+    const m = new MouseLook();
+    feed(m, deltas, 0, 8);
+    assert(!m.stats.echo && m.stats.echoes === 0, `${name}: echo filter tripped`);
+    // All of these ramp gradually, so the spike filter keeps every event.
+    const want = deltas.reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+    assert(m.dx === want[0] && m.dy === want[1], `${name}: motion lost`);
+  }
+});
+
+test('look: echo filter turns itself off when the warp starts working again', () => {
+  const m = new MouseLook();
+  replayFrames(m, firefoxEcho.events.slice(0, 20));
+  assert(m.stats.echo, 'not detected');
+  feed(m, Array.from({ length: 12 }, () => [5, 3]), 1000, 8);
+  assert(!m.stats.echo, 'still filtering a clean stream');
+});

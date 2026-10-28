@@ -31,16 +31,44 @@ export const SETTLE_EVENTS = 2;
 /** Degrees per mouse count at sensitivity 1 (Quake/Source m_yaw). */
 export const DEG_PER_COUNT = 0.022;
 
+/**
+ * Firefox pointer-lock "echo" events. Firefox implements pointer lock by
+ * warping the OS cursor back to a fixed anchor after every move. Where that
+ * warp silently fails (Firefox on X11/XWayland under a Wayland compositor,
+ * which ignores XWarpPointer), Firefox still dispatches its own centring
+ * event, and that event's movementX/Y is the cursor's whole offset from the
+ * anchor, not a delta. The stream then alternates real delta, echo, real
+ * delta, echo, ..., and each echo equals the previous echo plus the real
+ * motion in between (scaled by 1/devicePixelRatio, hence a tolerance that
+ * grows with the motion). Summing echoes as deltas adds the cursor's
+ * position to the view every frame: the camera lurches by hundreds of
+ * counts, worst vertically, where offsets are largest.
+ *
+ * Detection needs two consecutive matches (echo ≈ echo + real, twice), a
+ * pattern real hand motion cannot make, since it needs each delta to be the
+ * sum of the two before it. Then each event is classified against the
+ * predicted cursor offset.
+ */
+export const ECHO_TOL = 3; // counts, absolute part of the match tolerance
+export const ECHO_TOL_FRAC = 0.35; // relative part (covers 1/DPR down to ~0.65)
+export const ECHO_MIN = 16; // an echo pattern must reach this size to be trusted
+export const ECHO_EXIT_REALS = 8; // this many reals in a row with no echo: warp works again
+
+const cheb = (x, y) => Math.max(Math.abs(x), Math.abs(y));
+/** v matches pred on both axes, with tolerance growing with `motion`. */
+function echoMatch(vx, vy, px, py, mx, my) {
+  return Math.abs(vx - px) <= ECHO_TOL + ECHO_TOL_FRAC * Math.abs(mx) &&
+         Math.abs(vy - py) <= ECHO_TOL + ECHO_TOL_FRAC * Math.abs(my);
+}
+
 export class MouseLook {
   constructor() {
     this.dx = 0; // accumulated counts since the last consume()
     this.dy = 0;
     this.yawRad = 0; // accumulated radians from touch
     this.pitchRad = 0;
-    this.settle = 0;
-    this.prevMag = 0;
-    this.prevTime = -Infinity;
-    this.stats = { accepted: 0, rejected: 0, last: [0, 0], maxAbs: 0 };
+    this.stats = { accepted: 0, rejected: 0, echoes: 0, echo: false, last: [0, 0], maxAbs: 0 };
+    this.reset(0);
   }
 
   /** Call when pointer lock is gained or lost: drops pending input and the warp events. */
@@ -49,6 +77,14 @@ export class MouseLook {
     this.settle = settleEvents;
     this.prevMag = 0;
     this.prevTime = -Infinity;
+    // Echo filter: last 4 raw events as {x, y, acc} (acc = added to dx/dy).
+    this.hist = [];
+    this.echo = false;
+    this.trackX = this.trackY = 0; // last echo = cursor offset from the anchor
+    this.sinceX = this.sinceY = 0; // real motion since that echo
+    this.lastWasEcho = false;
+    this.realRun = 0;
+    this.stats.echo = false;
   }
 
   /**
@@ -62,26 +98,91 @@ export class MouseLook {
       s.rejected++;
       return false;
     }
-    const mag = Math.max(Math.abs(mx), Math.abs(my));
+    const mag = cheb(mx, my);
     s.maxAbs = Math.max(s.maxAbs, mag);
     if (this.settle > 0) {
       this.settle--;
       s.rejected++;
       return false;
     }
+    if (this.isEcho(mx, my)) {
+      s.echoes++;
+      s.rejected++;
+      return false;
+    }
+    const acc = this.spikeFilter(mx, my, mag, t);
+    if (!this.echo) {
+      this.hist.push({ x: mx, y: my, acc });
+      if (this.hist.length > 4) this.hist.shift();
+    }
+    if (!acc) {
+      s.rejected++;
+      return false;
+    }
+    this.dx += mx;
+    this.dy += my;
+    s.accepted++;
+    return true;
+  }
+
+  /** Echo filter (see ECHO_*). True if (vx, vy) is a Firefox echo to drop. */
+  isEcho(vx, vy) {
+    if (this.echo) {
+      const px = this.trackX + this.sinceX, py = this.trackY + this.sinceY;
+      // Right after an echo a real delta is due, so only a tight match counts;
+      // otherwise "closer to the predicted offset than to zero" is enough,
+      // which also re-syncs the track after a misclassification.
+      const tight = echoMatch(vx, vy, px, py, this.sinceX, this.sinceY);
+      const loose = !this.lastWasEcho && cheb(vx - px, vy - py) < cheb(vx, vy);
+      if (tight || loose) {
+        this.trackX = vx; this.trackY = vy;
+        this.sinceX = this.sinceY = 0;
+        this.lastWasEcho = true;
+        this.realRun = 0;
+        return true;
+      }
+      this.lastWasEcho = false;
+      this.sinceX += vx; this.sinceY += vy;
+      if (++this.realRun >= ECHO_EXIT_REALS) {
+        this.echo = this.stats.echo = false;
+        this.hist = [];
+      }
+      return false;
+    }
+    if (this.hist.length < 4) return false;
+    const [a, b, c, d] = this.hist;
+    const echoSize = Math.max(cheb(a.x, a.y), cheb(c.x, c.y), cheb(vx, vy));
+    const realSize = Math.max(cheb(b.x, b.y), cheb(d.x, d.y), ECHO_TOL);
+    if (echoSize < ECHO_MIN || echoSize < 2 * realSize) return false;
+    if (!echoMatch(c.x, c.y, a.x + b.x, a.y + b.y, b.x, b.y)) return false;
+    if (!echoMatch(vx, vy, c.x + d.x, c.y + d.y, d.x, d.y)) return false;
+    // Confirmed. Take back the two echoes already added; if they were applied
+    // last frame, this turns the view back on the next frame.
+    for (const e of [a, c]) {
+      if (e.acc) { this.dx -= e.x; this.dy -= e.y; this.stats.accepted--; }
+    }
+    this.echo = this.stats.echo = true;
+    this.stats.echoes += 2;
+    this.trackX = vx; this.trackY = vy;
+    this.sinceX = this.sinceY = 0;
+    this.lastWasEcho = true;
+    this.realRun = 0;
+    this.prevMag = realSize;
+    this.hist = [];
+    return true;
+  }
+
+  /** Spike filter (see SPIKE_*). True if the event is plausible hand motion. */
+  spikeFilter(mx, my, mag, t) {
     const prev = t - this.prevTime <= SPIKE_WINDOW_MS ? this.prevMag : 0;
     this.prevTime = t;
     if (mag > SPIKE_FLOOR && mag > SPIKE_RATIO * prev) {
       // Remember it capped, so a real flick that starts hard loses only its
       // first frame, while a lone huge spike can't vouch for another one.
       this.prevMag = SPIKE_FLOOR;
-      s.rejected++;
       return false;
     }
     this.prevMag = mag;
-    this.dx += mx;
-    this.dy += my;
-    s.accepted++;
     return true;
   }
 

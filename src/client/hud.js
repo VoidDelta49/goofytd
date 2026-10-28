@@ -35,7 +35,7 @@ export class Hud {
       this.debugEl.textContent =
         `mouse debug (?debug)\nlock ${input.locked} · mode ${input.lockMode} · dpr ${devicePixelRatio}\n` +
         `last dx,dy ${st.last.join(', ')} · max |delta| ${st.maxAbs}\n` +
-        `accepted ${st.accepted} · rejected ${st.rejected} · sens ${input.settings.sensitivity}\n` +
+        `accepted ${st.accepted} · rejected ${st.rejected} · echoes ${st.echoes}${st.echo ? ' (FIREFOX ECHO FILTER ON)' : ''} · sens ${input.settings.sensitivity}\n` +
         `yaw ${(player.yaw * 180 / Math.PI).toFixed(1)}° pitch ${(player.pitch * 180 / Math.PI).toFixed(1)}°\n${navigator.userAgent.slice(0, 90)}`;
     }
     const s = player.state;

@@ -29,6 +29,7 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Default map | Open 200 m field, milk at the centre, 3 m boundary wall; movement playground at `?map=playground` | Empty space to build and test towers; the playground stays for tuning movement. |
 | Mouse look | Pointer lock, with drag-to-look when the browser refuses the lock | A refused lock (sandboxed embed, Chrome's re-lock cooldown after Esc) used to leave the mouse unable to look, silently. |
 | Camera / mouse look | `src/client/look.js`: mouse deltas are filtered (first 2 events after a lock change, NaN, and out-of-nowhere spikes: >400 counts and >6× the previous event; no fixed cap, because browsers sum a whole frame's motion into one event) and accumulated, applied once per frame; camera orientation is a quaternion built straight from yaw/pitch (no Euler order, no roll). Standard pointer lock by default, raw input opt-in with `?raw=1`; `?debug` shows live mouse stats | Rewrite after reports of the view spinning erratically; the whole path is unit-tested and checked against the real three.js camera. |
+| Firefox echo filter | `MouseLook.isEcho()`: when Firefox's warp-to-anchor fails (seen on Linux X11/XWayland), every real delta is followed by an "echo" event whose movementX/Y is the cursor's whole offset from the anchor. After two confirmed echoes (each ≈ previous echo + the real delta between) those events are dropped; it switches off after 8 clean events. `?debug` shows `echoes` and `FIREFOX ECHO FILTER ON` | Cause of the jittery vertical look in Firefox, confirmed from a recorded event stream (`tests/fixtures/firefox-echo.json`, replayed in the tests). |
 | Pointer-lock refusals | Within 1.5 s of leaving the lock (Chrome's cooldown) or on a first refusal: stay paused and ask for another click. Drag-to-look only with no API or two refusals outside the cooldown | Auto-switching to drag-look on any refusal made the game flip in and out of capture and left a free cursor that clicked out of the window. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
@@ -114,7 +115,7 @@ src/sim/                pure simulation, no three.js / DOM
   movement.js           pmove-style movement tick
 src/client/             browser-only
   render.js             three.js scene, world-UV box meshes, grid texture, lights
-  look.js               mouse-delta filter/accumulator, view quaternion (pure, tested)
+  look.js               mouse-delta filter (spikes, Firefox echoes)/accumulator, view quaternion (pure, tested)
   input.js              pointer lock + drag-look fallback, keyboard, bindings, settings
   touch.js              touch stick, drag-look and buttons
   hud.js                speed/state/FPS overlay
