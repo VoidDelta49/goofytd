@@ -1,0 +1,10 @@
+{
+  "name": "goofytd",
+  "private": true,
+  "description": "CowTD: goofy first-person tower defense. No build step; this file only tells Node the sources are ES modules and gives a test shortcut.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.js",
+    "serve": "python3 -m http.server 8080"
+  }
+}

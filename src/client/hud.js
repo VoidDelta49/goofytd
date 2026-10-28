@@ -1,0 +1,37 @@
+// DOM overlay: speed readout, movement state, FPS and controls hint.
+
+import { horizontalSpeed } from '../sim/movement.js';
+
+export class Hud {
+  constructor(root) {
+    this.root = root;
+    this.speedEl = root.querySelector('[data-hud=speed]');
+    this.infoEl = root.querySelector('[data-hud=info]');
+    this.hintEl = root.querySelector('[data-hud=hint]');
+    this.frameTimes = [];
+    this.lastText = 0;
+  }
+
+  /** @param {number} now ms timestamp @param {number} frameDt seconds */
+  update(now, frameDt, player, cfg, input) {
+    this.frameTimes.push(frameDt);
+    if (this.frameTimes.length > 60) this.frameTimes.shift();
+    this.hintEl.hidden = input.locked;
+
+    // Text 15× per second is plenty and avoids per-frame layout work.
+    if (now - this.lastText < 66) return;
+    this.lastText = now;
+
+    const s = player.state;
+    const speed = horizontalSpeed(s);
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    const where = s.grounded ? 'ground' : 'air';
+    this.speedEl.textContent = `${speed.toFixed(2)} m/s`;
+    // Gold once air strafing pushes past running speed.
+    this.speedEl.classList.toggle('fast', speed > cfg.maxGroundSpeed + 0.1);
+    this.infoEl.textContent =
+      `top ${player.topSpeed.toFixed(2)} · ${where}${s.crouched ? ', crouched' : ''}` +
+      ` · auto-hop ${cfg.autoHop ? 'on' : 'off'} · sens ${input.settings.sensitivity.toFixed(1)}` +
+      ` · ${avg > 0 ? Math.round(1 / avg) : 0} fps`;
+  }
+}

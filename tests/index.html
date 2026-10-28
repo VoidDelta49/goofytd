@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>CowTD tests</title>
+  <style>
+    body { font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 24px; background: #111; color: #ddd; }
+    .ok { color: #7c7; } .fail { color: #f77; white-space: pre-wrap; } .sum { margin-top: 12px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>CowTD tests</h1>
+  <div id="out"></div>
+  <script type="module">
+    import './sim.test.js';
+    import './loop.test.js';
+    import { runAll } from './harness.js';
+    const out = document.getElementById('out');
+    const { failed } = await runAll((line) => {
+      const div = document.createElement('div');
+      div.textContent = line;
+      div.className = line.startsWith('ok') ? 'ok' : line.startsWith('FAIL') ? 'fail' : 'sum';
+      out.append(div);
+    });
+    document.title = failed ? `✗ ${failed} failed` : '✓ all passed';
+  </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CowTD</title>
+  <!-- No build step: three.js comes straight from a CDN, pinned to an exact version. -->
+  <script type="importmap">
+    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
+  </script>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #9ec7f2; }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+    #hud {
+      position: fixed; inset: 0; pointer-events: none;
+      font: 500 15px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #fff; text-shadow: 0 1px 2px #000a;
+    }
+    #hud .readout { position: absolute; left: 14px; top: 10px; }
+    #hud [data-hud=speed] { font-size: 28px; font-weight: 700; }
+    #hud [data-hud=speed].fast { color: #ffd84d; }
+    #hud .crosshair {
+      position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
+      border-radius: 50%; background: #fffe; box-shadow: 0 0 2px #000a;
+    }
+    #hud [data-hud=hint] {
+      position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
+      background: #0004; font-size: 16px; line-height: 1.8;
+    }
+    #hud [data-hud=hint][hidden] { display: none; }
+    #hud [data-hud=hint] b { font-size: 26px; }
+    #hud kbd {
+      padding: 0 6px; border: 1px solid #fff8; border-radius: 4px; background: #0003; font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" tabindex="0"></canvas>
+  <div id="hud">
+    <div class="readout">
+      <div data-hud="speed">0.00 m/s</div>
+      <div data-hud="info"></div>
+    </div>
+    <div class="crosshair"></div>
+    <div data-hud="hint">
+      <b>Click to play</b>
+      <div><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
+      <div><kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
+    </div>
+  </div>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
