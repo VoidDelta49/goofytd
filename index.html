@@ -2,35 +2,95 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- user-scalable=no: pinch/double-tap zoom would fight the look and move thumbs. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>CowTD</title>
   <!-- No build step: three.js comes straight from a CDN, pinned to an exact version. -->
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js" } }
   </script>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #9ec7f2; }
-    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-    #hud {
+    html, body {
+      margin: 0; height: 100%; overflow: hidden; background: #9ec7f2;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+      -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; outline: none; touch-action: none; }
+    #hud, #touch {
       position: fixed; inset: 0; pointer-events: none;
       font: 500 15px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       color: #fff; text-shadow: 0 1px 2px #000a;
     }
-    #hud .readout { position: absolute; left: 14px; top: 10px; }
+    #hud .readout {
+      position: absolute;
+      left: calc(14px + env(safe-area-inset-left)); top: calc(10px + env(safe-area-inset-top));
+    }
     #hud [data-hud=speed] { font-size: 28px; font-weight: 700; }
     #hud [data-hud=speed].fast { color: #ffd84d; }
     #hud .crosshair {
       position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px;
       border-radius: 50%; background: #fffe; box-shadow: 0 0 2px #000a;
     }
+    #hud [data-hud=notice] {
+      position: absolute; left: 50%; top: calc(10px + env(safe-area-inset-top)); transform: translateX(-50%);
+      max-width: 90vw; padding: 4px 10px; border-radius: 6px; background: #000a; text-align: center;
+    }
+    #hud [data-hud=notice]:empty { display: none; }
     #hud [data-hud=hint] {
       position: absolute; inset: 0; display: grid; place-content: center; text-align: center;
-      background: #0004; font-size: 16px; line-height: 1.8;
+      padding: 16px; background: #0004; font-size: 16px; line-height: 1.8;
     }
     #hud [data-hud=hint][hidden] { display: none; }
     #hud [data-hud=hint] b { font-size: 26px; }
     #hud kbd {
       padding: 0 6px; border: 1px solid #fff8; border-radius: 4px; background: #0003; font: inherit;
+    }
+    .touch-only { display: none; }
+    body.touch-device .touch-only { display: block; }
+    body.touch-device .desk-only { display: none; }
+
+    /* Touch controls. The canvas takes stick and look touches; only the buttons catch pointers. */
+    #touch[hidden] { display: none; }
+    #touch .stick {
+      position: absolute; width: 112px; height: 112px; margin: -56px 0 0 -56px;
+      border-radius: 50%; border: 2px solid #fff6; background: #0002; display: none;
+    }
+    #touch .stick.on { display: block; }
+    #touch .knob {
+      position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px;
+      border-radius: 50%; background: #fffa;
+    }
+    #touch .stick-hint {
+      position: absolute; left: calc(40px + env(safe-area-inset-left)); bottom: calc(40px + env(safe-area-inset-bottom));
+      width: 96px; height: 96px; border-radius: 50%; border: 2px dashed #fff5;
+    }
+    #touch .stick-hint.gone { display: none; }
+    #touch button {
+      position: absolute; pointer-events: auto; touch-action: none;
+      border: 2px solid #fff8; border-radius: 50%; background: #0003; color: #fff;
+      font: 700 13px ui-monospace, Menlo, Consolas, monospace; text-shadow: 0 1px 2px #000a; padding: 0;
+    }
+    #touch button.down, #touch button.on { background: #fff5; }
+    #touch [data-touch=jump] {
+      width: 84px; height: 84px; right: calc(28px + env(safe-area-inset-right)); bottom: calc(36px + env(safe-area-inset-bottom));
+    }
+    #touch [data-touch=crouch] {
+      width: 62px; height: 62px; right: calc(124px + env(safe-area-inset-right)); bottom: calc(28px + env(safe-area-inset-bottom));
+    }
+    #touch .small {
+      width: 40px; height: 40px; top: calc(10px + env(safe-area-inset-top)); font-size: 12px; border-radius: 10px;
+    }
+    #touch [data-touch=fullscreen] { right: calc(12px + env(safe-area-inset-right)); }
+    #touch [data-touch=respawn] { right: calc(58px + env(safe-area-inset-right)); }
+    #touch [data-touch=autoHop] { right: calc(104px + env(safe-area-inset-right)); }
+    #touch [data-touch=sensUp] { right: calc(150px + env(safe-area-inset-right)); }
+    #touch [data-touch=sensDown] { right: calc(196px + env(safe-area-inset-right)); }
+    @media (max-width: 700px), (max-height: 450px) {
+      #hud .readout { font-size: 12px; }
+      #hud [data-hud=speed] { font-size: 20px; }
     }
   </style>
 </head>
@@ -42,11 +102,26 @@
       <div data-hud="info"></div>
     </div>
     <div class="crosshair"></div>
+    <div data-hud="notice"></div>
     <div data-hud="hint">
-      <b>Click to play</b>
-      <div><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
-      <div><kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
+      <b class="desk-only">Click to play</b>
+      <b class="touch-only">Tap to play</b>
+      <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
+      <div class="desk-only"><kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
+      <div class="touch-only">Left thumb: move · drag the right side to look</div>
+      <div class="touch-only">Drag from the jump button to steer mid-air</div>
     </div>
+  </div>
+  <div id="touch" hidden>
+    <div class="stick-hint"></div>
+    <div class="stick"><div class="knob"></div></div>
+    <button data-touch="jump" aria-label="Jump">JUMP</button>
+    <button data-touch="crouch" aria-label="Crouch (toggle)">DUCK</button>
+    <button class="small" data-touch="sensDown" aria-label="Lower look sensitivity">S−</button>
+    <button class="small" data-touch="sensUp" aria-label="Raise look sensitivity">S+</button>
+    <button class="small" data-touch="autoHop" aria-label="Toggle auto-hop">HOP</button>
+    <button class="small" data-touch="respawn" aria-label="Respawn">R</button>
+    <button class="small" data-touch="fullscreen" aria-label="Fullscreen">⛶</button>
   </div>
   <script type="module" src="./src/main.js"></script>
 </body>

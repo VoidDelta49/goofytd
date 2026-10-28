@@ -26,6 +26,9 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Player physics | Custom kinematic controller (Quake 3 / Source "pmove" style) | Movement feel is a pillar, so we own every number; deterministic and testable. |
 | Player collision | Axis-aligned hull vs. static axis-aligned boxes, swept (no tunnelling) | Simple and exact for grey-box levels. Slopes/ramps need another shape type later. |
 | Tick rate | Fixed 64 Hz simulation, camera interpolated between ticks | Frame-rate independent movement; matches Source/CS tick rates. |
+| Default map | Open 200 m field, milk at the centre, 3 m boundary wall; movement playground at `?map=playground` | Empty space to build and test towers; the playground stays for tuning movement. |
+| Mouse look | Pointer lock, with drag-to-look when the browser refuses the lock | A refused lock (sandboxed embed, Chrome's re-lock cooldown after Esc) used to leave the mouse unable to look, silently. |
+| Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
 Still open: collision approach for thousands of cows (likely a uniform grid), WebGPU renderer, multiplayer networking model. JS floating-point maths (`Math.sin` etc.) is not guaranteed bit-identical across browsers, which matters for lockstep PvP; decide when PvP is scoped.
 
@@ -37,7 +40,7 @@ Any static file server works. ES modules don't load from `file://`, so you do ne
 
 ```sh
 python3 -m http.server 8080      # or: npx serve, or VS Code Live Server
-# open http://localhost:8080
+# open http://localhost:8080   (movement test level: http://localhost:8080/?map=playground)
 ```
 
 Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from a branch*, branch `main`, folder `/ (root)`. The `.nojekyll` file makes Pages serve files as-is.
@@ -55,6 +58,19 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | [ and ] | Mouse sensitivity (saved in the browser) |
 | Esc | Release the mouse |
 
+If the browser refuses mouse capture (for example inside a sandboxed embed), a notice appears and you look by holding the left button and dragging instead.
+
+Touch (phones and tablets; appears on the first tap):
+
+| Input | Action |
+|---|---|
+| Left part of the screen | Floating move stick (put your thumb down anywhere there) |
+| Drag on the right part | Look |
+| JUMP | Jump; hold with auto-hop on to keep hopping; keep dragging the same thumb to steer |
+| DUCK | Crouch toggle |
+| S− / S+ | Look sensitivity (degrees per pixel, saved in the browser) |
+| HOP, R, ⛶ | Auto-hop toggle, respawn, fullscreen (also locks landscape where the browser allows) |
+
 Movement tunables can be changed live from the browser console, e.g. `goofytd.cfg.airAccel = 20`.
 
 ## Tests
@@ -67,7 +83,7 @@ node tests/run.js        # or: npm test
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
-They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, and the fixed-tick loop at different frame rates.
+They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, and the touch stick mapping.
 
 ## Movement model
 
@@ -79,7 +95,7 @@ They cover collision sweeps (including tunnelling), acceleration, friction, wall
 - Step-slide climbs ledges up to 0.45 m; walking down stairs snaps to the ground instead of going airborne.
 - Crouching shrinks the hull to 1.2 m. In the air the legs tuck up, so a **crouch jump** reaches 0.6 m higher.
 
-The test level (`src/level.js`) has a step-height row, stairs to a 3 m platform, a 1.1 m ledge (plain jump), a 1.7 m ledge (crouch jump only), a crawl tunnel, a pillar-lined bunny-hop runway, and the milk.
+The default level is the open field. The movement test level (`?map=playground`) has a step-height row, stairs to a 3 m platform, a 1.1 m ledge (plain jump), a 1.7 m ledge (crouch jump only), a crawl tunnel, a pillar-lined bunny-hop runway, and the milk.
 
 ## Layout
 
@@ -88,14 +104,15 @@ index.html              page, import map, HUD markup
 src/main.js             entry point: frame loop wiring sim, input, render, HUD
 src/fixed-clock.js      fixed-timestep accumulator (64 Hz) + interpolation alpha
 src/player.js           player body: input latching, interpolation, respawn
-src/level.js            level blocks: single source for collision and meshes
+src/level.js            levels (open field, movement playground): one block list for collision and meshes
 src/sim/                pure simulation, no three.js / DOM
   vec3.js               small vector type
   collision.js          AABB world, swept-box queries
   movement.js           pmove-style movement tick
 src/client/             browser-only
   render.js             three.js scene, world-UV box meshes, grid texture, lights
-  input.js              pointer lock, keyboard, mouse, bindings, sensitivity
+  input.js              pointer lock + drag-look fallback, keyboard, bindings, sensitivity
+  touch.js              touch stick, drag-look and buttons
   hud.js                speed/state/FPS overlay
 tests/                  harness.js, *.test.js, run.js (Node), index.html (browser)
 ```

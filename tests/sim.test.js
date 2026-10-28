@@ -7,7 +7,7 @@ import { Vec3, v3 } from '../src/sim/vec3.js';
 import {
   createPlayerState, defaultMoveConfig, emptyInput, horizontalSpeed, hullHalfExtents, tick,
 } from '../src/sim/movement.js';
-import { levelCollision, movementPlayground } from '../src/level.js';
+import { LEVELS, levelCollision, openField } from '../src/level.js';
 
 const DT = 1 / 64;
 const HALF = v3(0.4, 0.9, 0.4);
@@ -315,15 +315,34 @@ test('simulation is deterministic for the same input script', () => {
 
 // ------------------------------------------------------------------- level
 
-test('level: spawn is free and standing on the floor', () => {
-  const level = movementPlayground();
+test('level: every spawn is free and standing on the floor', () => {
+  for (const [name, make] of Object.entries(LEVELS)) {
+    const level = make();
+    const w = levelCollision(level);
+    const cfg = defaultMoveConfig();
+    const half = hullHalfExtents(cfg, false);
+    const center = level.spawn.add(v3(0, half.y, 0));
+    assert(!w.boxBlocked(center, half), `${name}: spawn inside a solid`);
+    const hit = w.sweep(center, half, v3(0, -1, 0));
+    assert(hit && hit.t === 0, `${name}: spawn not on the floor`);
+  }
+});
+
+test('level: open field walls hold a 40 m/s crouch-jumping player at every edge', () => {
+  const level = openField();
   const w = levelCollision(level);
-  const cfg = defaultMoveConfig();
-  const half = hullHalfExtents(cfg, false);
-  const center = level.spawn.add(v3(0, half.y, 0));
-  assert(!w.boxBlocked(center, half), 'spawn inside a solid');
-  const hit = w.sweep(center, half, v3(0, -1, 0));
-  assert(hit && hit.t === 0, 'spawn not on the floor');
+  const cfg = { ...defaultMoveConfig(), autoHop: true };
+  const lim = level.halfSize;
+  // Yaw 0 faces -Z; π/2 faces -X; π faces +Z; 3π/2 faces +X; plus a corner.
+  for (const yaw of [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2, Math.PI / 4]) {
+    const s = createPlayerState(level.spawn, cfg);
+    s.velocity = v3(-Math.sin(yaw), 0, -Math.cos(yaw)).scale(40);
+    for (let i = 0; i < 64 * 10; i++) {
+      tick(s, input({ wish: { x: 0, y: 1 }, yaw, jumpPressed: true, jumpHeld: true, crouchHeld: (i >> 4) % 2 === 1 }), cfg, w, DT);
+    }
+    const p = s.position;
+    assert(Math.abs(p.x) < lim && Math.abs(p.z) < lim && p.y >= 0, `escaped at yaw ${yaw.toFixed(2)}: ${p.x}, ${p.y}, ${p.z}`);
+  }
 });
 
 test('level: the 1.7 m ledge needs a crouch jump, the 1.1 m one does not', () => {

@@ -1,5 +1,5 @@
-// The movement test level. One list of blocks is the single source of truth
-// for both collision and rendering, so they can never disagree.
+// Levels. One list of blocks per level is the single source of truth for both
+// collision and rendering, so they can never disagree.
 
 import { Aabb, CollisionWorld } from './sim/collision.js';
 import { Vec3, v3 } from './sim/vec3.js';
@@ -72,3 +72,27 @@ export function movementPlayground() {
 
   return { blocks: b, spawn: Vec3.ZERO, spawnYaw: 0 };
 }
+
+/**
+ * Open field for building and testing tower defence: 200 m of flat floor,
+ * the milk at the centre, and a 3 m boundary wall (a crouch jump peaks
+ * near 1.8 m, so nothing gets out). The player spawns 10 m south of the
+ * milk, facing it.
+ */
+export function openField() {
+  const S = Surface;
+  const half = 100, wallH = 3;
+  const b = [
+    block(S.Floor, [-half, -1, -half], [half, 0, half]),
+    block(S.Wall, [-half - 1, 0, -half - 1], [half + 1, wallH, -half]),
+    block(S.Wall, [-half - 1, 0, half], [half + 1, wallH, half + 1]),
+    block(S.Wall, [-half - 1, 0, -half], [-half, wallH, half]),
+    block(S.Wall, [half, 0, -half], [half + 1, wallH, half]),
+    block(S.Milk, [-1.5, 0, -1.5], [1.5, 4.5, 1.5]),
+  ];
+  return { blocks: b, spawn: v3(0, 0, 10), spawnYaw: 0, halfSize: half };
+}
+
+/** Levels by URL name: `?map=playground` opens the movement playground. */
+export const LEVELS = Object.freeze({ field: openField, playground: movementPlayground });
+export const DEFAULT_LEVEL = 'field';
