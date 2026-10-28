@@ -30,6 +30,17 @@ export class TdRenderer {
     this.cowMesh.frustumCulled = false; // instances span the whole field
     this.cowMesh.count = 0;
     scene.add(this.cowMesh);
+    // Wings for flying cows: two instances per flyer, flapping, in a second instanced draw.
+    this.wingMesh = new THREE.InstancedMesh(wingGeometry(), new THREE.MeshStandardMaterial({ color: 0xf4f8ff, roughness: 0.6, side: THREE.DoubleSide }), game.cows.capacity * 2);
+    this.wingMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.wingMesh.castShadow = true;
+    this.wingMesh.frustumCulled = false;
+    this.wingMesh.count = 0;
+    scene.add(this.wingMesh);
+    this.wingLocal = new THREE.Matrix4();
+    this.wingTmp = new THREE.Matrix4();
+    this.flash = new THREE.Color(1, 0, 0);
+    this.fuse = new THREE.Color(1, 0.95, 0.3);
 
     this.towerViews = new Map();
     this.ghosts = new Map();
@@ -137,6 +148,11 @@ export class TdRenderer {
         this.puff(e.x, 0.8, e.z, 0.9, 0xffffff);
       } else if (e.kind === 'drink') {
         this.puff(e.x, 0.8, e.z, 1.2, 0xf0f0ff);
+      } else if (e.kind === 'boom') {
+        this.puff(e.x, 0.6, e.z, e.radius * 1.3, 0xff7a1a);
+        this.puff(e.x, 1.4, e.z, e.radius * 0.8, 0xffe066);
+      } else if (e.kind === 'destroyed') {
+        this.puff(e.x, 0.8, e.z, 1.6, 0x6b5a46);
       }
     }
   }
@@ -170,26 +186,44 @@ export class TdRenderer {
     const c = this.game.cows;
     const m = this.cowMesh;
     const o = this.tmp, col = this.tmpColor;
+    let wings = 0;
     for (let i = 0; i < c.count; i++) {
       const x = c.px[i] + (c.x[i] - c.px[i]) * alpha;
       const z = c.pz[i] + (c.z[i] - c.pz[i]) * alpha;
       const type = COW_TYPE_LIST[c.type[i]];
-      // Waddle: bob and roll a little, out of phase per cow.
       const ph = this.time * 9 + c.id[i] * 1.7;
-      o.position.set(x, Math.abs(Math.sin(ph)) * 0.08, z);
-      // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
-      o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), Math.sin(ph) * 0.05);
+      if (type.altitude > 0) {
+        // Flyers bob slowly up and down instead of waddling.
+        o.position.set(x, type.altitude + Math.sin(ph * 0.4) * 0.3, z);
+        o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), 0);
+      } else {
+        // Waddle: bob and roll a little, out of phase per cow.
+        o.position.set(x, Math.abs(Math.sin(ph)) * 0.08, z);
+        // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
+        o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), Math.sin(ph) * 0.05);
+      }
       o.scale.setScalar(type.scale);
       o.updateMatrix();
       m.setMatrixAt(i, o.matrix);
-      // Flash red when hit.
-      const f = Math.min(1, c.hitAge[i] / 0.12);
-      col.setRGB(1, f, f);
+      if (type.altitude > 0 && wings + 2 <= this.wingMesh.instanceMatrix.count) {
+        const flap = Math.sin(this.time * 14 + c.id[i]) * 0.6;
+        for (const side of [1, -1]) {
+          this.wingLocal.makeRotationZ(side * flap).premultiply(this.wingTmp.makeTranslation(side * 0.36, 1.1, -0.1));
+          this.wingLocal.multiply(this.wingTmp.makeScale(side, 1, 1));
+          this.wingMesh.setMatrixAt(wings++, this.wingTmp.multiplyMatrices(o.matrix, this.wingLocal));
+        }
+      }
+      // Type tint; Kaboom Cows flicker like a lit fuse; everything flashes red when hit.
+      col.setHex(type.color);
+      if (type.blastRadius > 0) col.lerp(this.fuse, 0.5 + 0.5 * Math.sin(this.time * 14 + c.id[i]));
+      col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       m.setColorAt(i, col);
     }
     m.count = c.count;
     m.instanceMatrix.needsUpdate = true;
     m.instanceColor.needsUpdate = true;
+    this.wingMesh.count = wings;
+    this.wingMesh.instanceMatrix.needsUpdate = true;
   }
 
   syncTowers() {
@@ -312,6 +346,13 @@ export class TdRenderer {
       p.mesh.material.opacity = 0.7 * (1 - s);
     }
   }
+}
+
+/** One wing: a flat feathery plank sticking out along +X from the shoulder (mirrored for the left). */
+function wingGeometry() {
+  const g = new THREE.BoxGeometry(0.9, 0.05, 0.5);
+  g.translate(0.45, 0, 0);
+  return g;
 }
 
 /**

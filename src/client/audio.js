@@ -70,6 +70,15 @@ const SOUNDS = {
       v.tone('sine', [110, 38], 0.38, 0.9);
     },
   },
+  // A Kaboom Cow going off: a big low blast with a crackly tail.
+  boom: {
+    gap: 0.08, max: 3, vol: 1.0,
+    build(v) {
+      v.tone('sine', [90, 28], 0.7, 1.0);
+      v.noise(0.9, 0.9, 'lowpass', [2400, 120], 0.7, { attack: 0.005 });
+      v.noise(0.5, 0.25, 'highpass', [3000, 1200], 0.7, { delay: 0.05 });
+    },
+  },
   // A cow going down: a short surprised moo.
   kill: {
     gap: 0.06, max: 3, vol: 0.9,
@@ -385,6 +394,7 @@ export class Sfx {
         case 'splash': this.play('splash', e.x, e.z); break;
         case 'kill': this.play('kill', e.x, e.z); break;
         case 'drink': this.play('drink', e.x, e.z); break;
+        case 'boom': this.play('boom', e.x, e.z); break;
         case 'wave': this.play('wave'); break;
         case 'lost': this.play('lost'); break;
       }

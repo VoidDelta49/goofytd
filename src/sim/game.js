@@ -6,7 +6,7 @@
 import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
-import { CowPool, COW_TYPES, COW_TYPE_LIST } from './cows.js';
+import { CowPool, COW_TYPE_LIST, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, TOWER_TYPES } from './towers.js';
 import { mulberry32 } from './rng.js';
 
@@ -44,6 +44,13 @@ export const PlaceError = Object.freeze({
   BlocksPath: 'that would block every path to the milk',
   Money: 'not enough moolah',
 });
+
+/**
+ * A Kaboom Cow goes off when it gets this close (metres, cow edge to tower
+ * edge) to a tower: far enough that any cow walking in a cell next to a tower
+ * (centre within 1 m + its herd offset of the tower's edge) sets it off.
+ */
+export const BLAST_TRIGGER = 1.0;
 
 export class Game {
   /**
@@ -107,15 +114,17 @@ export class Game {
       this.nextWaveIn -= dt;
       if (this.nextWaveIn <= 0) this.startWave();
     }
-    const type = COW_TYPES.cow;
-    const hp = type.hp * (1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1));
+    const mix = waveMix(this.wave);
+    const hpScale = 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1);
     for (const s of this.spawners) {
       if (s.queue <= 0) continue;
       s.timer -= dt;
       while (s.timer <= 0 && s.queue > 0) {
         s.timer += this.cfg.spawnInterval;
         s.queue--;
-        this.spawnCow(type, s.x, s.z, hp);
+        // A one-type mix draws no random number, so early waves match the old sequence.
+        const type = mix.length === 1 ? mix[0].type : pickFromMix(mix, this.rng());
+        this.spawnCow(type, s.x, s.z, type.hp * hpScale);
       }
       if (s.queue === 0) s.timer = 0;
     }
@@ -129,7 +138,8 @@ export class Game {
     let sx = x + (this.rng() - 0.5) * spread, sz = z + (this.rng() - 0.5) * spread;
     const cell = this.grid.cellAt(sx, sz);
     if (cell < 0 || !this.grid.walkable(cell)) { sx = x; sz = z; }
-    const off = 0.6 * this.grid.cell;
+    // Herd spread inside a cell, narrower for wide cows so they don't clip the towers beside the path.
+    const off = Math.min(0.6 * this.grid.cell, Math.max(0, this.grid.cell - 2 * type.radius));
     const i = this.cows.spawn(type, sx, sz, (this.rng() - 0.5) * off, (this.rng() - 0.5) * off);
     if (i >= 0) this.cows.hp[i] = hp;
     return i;
@@ -164,8 +174,9 @@ export class Game {
         cows.remove(i);
         continue;
       }
-      let tx = this.milkX, tz = this.milkZ;
-      const n = cell >= 0 ? grid.next[cell] : -1;
+      // Walkers follow the flow field; flyers go straight for the milk over everything.
+      let tx = this.milkX + cows.ox[i], tz = this.milkZ + cows.oz[i];
+      const n = cell >= 0 && type.altitude <= 0 ? grid.next[cell] : -1;
       if (n >= 0) {
         tx = grid.centerX(n) + cows.ox[i];
         tz = grid.centerZ(n) + cows.oz[i];
@@ -179,12 +190,49 @@ export class Game {
       cows.vz[i] += (wz - cows.vz[i]) * turn;
       cows.x[i] = x + cows.vx[i] * dt;
       cows.z[i] = z + cows.vz[i] * dt;
+      if (type.blastRadius > 0 && this.towerNear(cows.x[i], cows.z[i], type.radius + BLAST_TRIGGER)) {
+        this.explodeCow(i, type);
+      }
     }
     if (this.milk <= 0) {
       this.milk = 0;
       this.lost = true;
       this.events.push({ kind: 'lost' });
     }
+  }
+
+  /**
+   * True if some tower's footprint is within `reach` metres of (x, z) in XZ.
+   * Looks only at the towers in the 5x5 cells around the point (reach must stay under 2 cells).
+   */
+  towerNear(x, z, reach) {
+    const { grid } = this;
+    const cx = grid.cellX(x), cz = grid.cellZ(z);
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (!grid.inBounds(cx + dx, cz + dz)) continue;
+        const id = grid.tower[grid.index(cx + dx, cz + dz)];
+        if (id && boxDist2(this.towers.get(id).aabb, x, z) <= reach * reach) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Kaboom: the cow at slot i blows up, wrecking every tower within its
+   * blastRadius (no refund) and taking itself out (no bounty, no milk lost).
+   * Only call while iterating cows backwards (or not at all).
+   */
+  explodeCow(i, type) {
+    const x = this.cows.x[i], z = this.cows.z[i];
+    const r2 = type.blastRadius * type.blastRadius;
+    const wrecked = [];
+    for (const t of this.towers.values()) if (boxDist2(t.aabb, x, z) <= r2) wrecked.push(t);
+    for (const t of wrecked) this.removeTower(t);
+    if (wrecked.length) this.grid.rebuild();
+    this.events.push({ kind: 'boom', x, z, radius: type.blastRadius, wrecked: wrecked.length });
+    for (const t of wrecked) this.events.push({ kind: 'destroyed', tower: t.id, name: t.def.name, x: t.x, z: t.z });
+    this.cows.remove(i);
   }
 
   updateTowers(dt) {
@@ -233,8 +281,10 @@ export class Game {
   splash(x, z, radius, damage, tower) {
     const { cows } = this;
     for (let i = cows.count - 1; i >= 0; i--) {
+      const type = COW_TYPE_LIST[cows.type[i]];
+      if (type.altitude > 0) continue; // shells land on the ground, under flyers
       const dx = cows.x[i] - x, dz = cows.z[i] - z;
-      const r = radius + COW_TYPE_LIST[cows.type[i]].radius;
+      const r = radius + type.radius;
       if (dx * dx + dz * dz <= r * r) this.damageCow(i, damage, tower);
     }
   }
@@ -254,8 +304,12 @@ export class Game {
     return true;
   }
 
-  /** Metres of path left from cow i to the milk (Infinity if lost off the grid). */
+  /** Metres of path left from cow i to the milk (Infinity if a walker is lost off the grid; flyers go straight). */
   cowPathDistance(i) {
+    if (COW_TYPE_LIST[this.cows.type[i]].altitude > 0) {
+      const dx = this.cows.x[i] - this.milkX, dz = this.cows.z[i] - this.milkZ;
+      return Math.sqrt(dx * dx + dz * dz);
+    }
     const c = this.grid.cellAt(this.cows.x[i], this.cows.z[i]);
     return c >= 0 ? this.grid.dist[c] : Infinity;
   }
@@ -296,7 +350,9 @@ export class Game {
     }
     const { cows } = this;
     for (let i = 0; i < cows.count; i++) {
-      const r = COW_TYPE_LIST[cows.type[i]].radius;
+      const ct = COW_TYPE_LIST[cows.type[i]];
+      if (ct.altitude > 0) continue; // flyers pass overhead
+      const r = ct.radius;
       if (cows.x[i] > minX - r && cows.x[i] < minX + size + r && cows.z[i] > minZ - r && cows.z[i] < minZ + size + r) {
         return fail(PlaceError.Cow);
       }
@@ -306,6 +362,7 @@ export class Game {
     // walling it off completely. (Mazing is fine and encouraged.)
     const mustReach = this.spawners.filter((s) => s.cell >= 0).map((s) => s.cell);
     for (let i = 0; i < cows.count; i++) {
+      if (COW_TYPE_LIST[cows.type[i]].altitude > 0) continue; // flyers don't need a path
       const c = grid.cellAt(cows.x[i], cows.z[i]);
       if (c >= 0 && Number.isFinite(grid.dist[c])) mustReach.push(c);
     }
@@ -339,14 +396,19 @@ export class Game {
   sellTower(id) {
     const t = this.towers.get(id);
     if (!t) return 0;
-    for (const i of t.cells) this.grid.tower[i] = 0;
+    this.removeTower(t);
     this.grid.rebuild();
-    this.removeSolid(t.aabb);
-    this.towers.delete(id);
     const refund = Math.floor(t.spent * SELL_REFUND);
     this.money += refund;
     this.events.push({ kind: 'sold', tower: id });
     return refund;
+  }
+
+  /** Take a tower off the grid and out of the world. The caller rebuilds the flow field. */
+  removeTower(t) {
+    for (const i of t.cells) this.grid.tower[i] = 0;
+    this.removeSolid(t.aabb);
+    this.towers.delete(t.id);
   }
 
   removeSolid(aabb) {
@@ -366,6 +428,13 @@ export class Game {
     }
     return best;
   }
+}
+
+/** Squared XZ distance from (x, z) to the nearest point of box b (0 inside). */
+export function boxDist2(b, x, z) {
+  const dx = x < b.min.x ? b.min.x - x : x > b.max.x ? x - b.max.x : 0;
+  const dz = z < b.min.z ? b.min.z - z : z > b.max.z ? z - b.max.z : 0;
+  return dx * dx + dz * dz;
 }
 
 /** Ray vs box, slab method. Returns the entry distance (0 if starting inside) or null. */

@@ -5,6 +5,7 @@ import { DEFAULT_LEVEL, LEVELS, levelCollision } from './level.js';
 import { PlayerController } from './player.js';
 import { defaultMoveConfig } from './sim/movement.js';
 import { Game, defaultGameConfig } from './sim/game.js';
+import { cowDebuts } from './sim/cows.js';
 import { Renderer } from './client/render.js';
 import { TdRenderer } from './client/td-render.js';
 import { BuildController, viewForward } from './client/build.js';
@@ -32,6 +33,7 @@ const input = new Input(canvas, document.getElementById('touch'), player, cfg);
 const hud = new Hud(document.getElementById('hud'));
 const sfx = new Sfx();
 const clock = new FixedClock();
+let announcedWave = 0;
 
 function startWave() {
   const before = game.wave;
@@ -157,6 +159,15 @@ function frame(now) {
     game.tick(clock.dt);
     td.consume(game.events); // tick() clears its events, so collect them every tick
     sfx.consume(game.events);
+    for (const e of game.events) {
+      if (e.kind === 'boom' && e.wrecked) say(`KABOOM! A Kaboom Cow blew up ${e.wrecked === 1 ? 'a tower' : `${e.wrecked} towers`}`, 2500);
+    }
+  }
+  // Announce new cow types the first time a wave brings them (auto or by hand).
+  if (game.wave !== announcedWave) {
+    announcedWave = game.wave;
+    const debuts = cowDebuts(game.wave);
+    if (debuts.length) say(`New cows this wave: ${debuts.map((t) => t.name).join(', ')}!`, 3500);
   }
 
   const eye = player.interpolatedEye(clock.alpha);

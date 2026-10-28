@@ -3,6 +3,7 @@ import './sim.test.js';
 import './loop.test.js';
 import './input.test.js';
 import './td.test.js';
+import './cows.test.js';
 import './audio.test.js';
 import './stamp.test.js'; // Node only: reads index.html and the sources
 import { runAll } from './harness.js';

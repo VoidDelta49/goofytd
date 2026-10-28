@@ -232,8 +232,8 @@ test('td: same seed, same match (determinism)', () => {
     g.placeTower('squirter', -15, 5);
     run(g, 45);
     let h = 0;
-    for (let i = 0; i < g.cows.count; i++) h = (h * 31 + g.cows.x[i] * 1000 + g.cows.z[i]) % 1e9;
-    return [g.wave, g.kills, g.milk, g.money, g.cows.count, h].join('|');
+    for (let i = 0; i < g.cows.count; i++) h = (h * 31 + g.cows.x[i] * 1000 + g.cows.z[i] + g.cows.type[i]) % 1e9;
+    return [g.wave, g.kills, g.milk, g.money, g.cows.count, g.towers.size, h].join('|');
   };
   const a = play(), b = play();
   assert(a === b, `${a} != ${b}`);
