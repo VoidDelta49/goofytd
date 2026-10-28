@@ -32,6 +32,7 @@ export const BINDINGS = {
   // Building. Digit1..Digit9 pick a tower (handled in onKey).
   place: ['KeyE'],
   sell: ['KeyX'],
+  upgrade: ['KeyU'],
   cancelBuild: ['KeyQ'],
   nextWave: ['KeyN'],
   restart: ['Enter'],
@@ -40,7 +41,7 @@ export const BINDINGS = {
 };
 
 /** Actions forwarded to `Input.handlers` (set by main.js) on key down. */
-const HANDLED_ACTIONS = ['place', 'sell', 'cancelBuild', 'nextWave', 'restart', 'mute'];
+const HANDLED_ACTIONS = ['place', 'sell', 'upgrade', 'cancelBuild', 'nextWave', 'restart', 'mute'];
 
 const SETTINGS_KEY = 'goofytd.settings';
 
@@ -118,7 +119,7 @@ export class Input {
     this.lockPending = false;
     this.refusals = 0;
     this.lastUnlockAt = -Infinity;
-    /** Game actions (building, waves, sound) wired up by main.js: { place, sell, cancelBuild, nextWave, restart, mute, pause, selectTower(n) }. */
+    /** Game actions (building, waves, sound) wired up by main.js: { place, sell, upgrade, cancelBuild, nextWave, restart, mute, pause, selectTower(n) }. */
     this.handlers = {};
     /** Set by main.js while the game is paused: game keys are ignored, P still resumes. */
     this.paused = false;

@@ -53,6 +53,32 @@ const SOUNDS = {
       v.tone('triangle', [520 * p, 260 * p], 0.09, 0.25, { delay: 0.02 });
     },
   },
+  // Zappy Fence: a short electric buzz.
+  zap: {
+    gap: 0.06, max: 3, vol: 0.7,
+    build(v, p) {
+      v.tone('sawtooth', [120 * p, 95 * p], 0.12, 0.45, { lowpass: [2400, 1200] });
+      v.noise(0.1, 0.4, 'highpass', [3000, 5000], 0.8);
+    },
+  },
+  // Moo-shotgun: a wet boom with a splatter tail.
+  blast: {
+    gap: 0.08, max: 3, vol: 1.0,
+    build(v, p) {
+      v.noise(0.22, 0.85, 'lowpass', [3200, 300], 0.8);
+      v.tone('sine', [140 * p, 45], 0.2, 0.8);
+      v.noise(0.16, 0.35, 'bandpass', [2400, 1300], 2, { delay: 0.05 });
+    },
+  },
+  // Tower upgraded: a rising arpeggio and a sparkle.
+  upgrade: {
+    gap: 0.1, max: 2, vol: 0.9,
+    build(v) {
+      [523, 659, 784, 1047].forEach((f, k) => v.tone('triangle', [f, f], 0.16, 0.42, { delay: k * 0.07 }));
+      v.tone('square', [2093, 2093], 0.3, 0.08, { delay: 0.28, lowpass: [6000, 6000] });
+      v.tone('sine', [130, 260], 0.25, 0.5);
+    },
+  },
   // Butter Mortar firing: thunk and a bloop.
   launch: {
     gap: 0.06, max: 4, vol: 0.9,
@@ -389,7 +415,8 @@ export class Sfx {
   consume(events) {
     for (const e of events) {
       switch (e.kind) {
-        case 'shot': this.play('shot', e.x0, e.z0); break;
+        // Multi-pellet / multi-zap shots mark all but one tracer quiet: one sound per volley.
+        case 'shot': if (!e.quiet) this.play(e.sound ?? 'shot', e.x0, e.z0); break;
         case 'launch': this.play('launch', e.x, e.z); break;
         case 'splash': this.play('splash', e.x, e.z); break;
         case 'kill': this.play('kill', e.x, e.z); break;

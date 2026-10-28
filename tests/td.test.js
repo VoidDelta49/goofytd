@@ -6,7 +6,7 @@ import { Aabb, CollisionWorld } from '../src/sim/collision.js';
 import { v3 } from '../src/sim/vec3.js';
 import { LEVELS, levelCollision, openField } from '../src/level.js';
 import { Game, PlaceError, defaultGameConfig } from '../src/sim/game.js';
-import { TOWER_TYPES, SELL_REFUND, defineTower } from '../src/sim/towers.js';
+import { TOWER_TYPES, TOWER_FORMS, SELL_REFUND, defineTower } from '../src/sim/towers.js';
 import { COW_TYPES } from '../src/sim/cows.js';
 
 const DT = 1 / 64;
@@ -221,6 +221,7 @@ test('td: a custom tower type plugs in with no other code', () => {
     assert(g.kills === 1, 'custom attack did not run');
   } finally {
     delete TOWER_TYPES['test-zapper'];
+    delete TOWER_FORMS['test-zapper'];
   }
 });
 

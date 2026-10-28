@@ -6,7 +6,7 @@
 // pointers in the overlay, so a mouse on a touch laptop still reaches the
 // canvas and pointer lock.
 
-import { SELL_REFUND, TOWER_TYPES } from '../sim/towers.js';
+import { SELL_REFUND, TOWER_TYPES, TOWER_FORMS } from '../sim/towers.js';
 
 /** CSS px of finger travel for full stick deflection. */
 export const STICK_RADIUS = 56;
@@ -34,7 +34,7 @@ export function stickVector(dx, dy, radius = STICK_RADIUS, deadzone = STICK_DEAD
  * so it can be tested: `sub` is the small second line, `dim` means "nothing to
  * do yet" (still tappable, it explains itself), `bad` means the ghost can't go there.
  */
-export function touchButtonState(game, build) {
+export function touchButtonState(game, build, upgradeOpen = false) {
   const sel = build.selected !== null ? TOWER_TYPES[build.selected] : null;
   const look = build.lookTower;
   let place;
@@ -44,9 +44,15 @@ export function touchButtonState(game, build) {
   const sell = look
     ? { sub: `+${Math.floor(look.spent * SELL_REFUND)} moolah`, dim: false }
     : { sub: 'look at a tower', dim: true };
+  let upgrade;
+  if (upgradeOpen) upgrade = { sub: 'close', dim: false, on: true };
+  else if (!look) upgrade = { sub: 'look at a tower', dim: true };
+  else if (!look.def.upgrades.length) upgrade = { sub: 'MAXED', dim: true };
+  else if (look.def.upgrades.length > 1) upgrade = { sub: 'pick a path!', dim: false };
+  else upgrade = { sub: `LV ${look.def.level + 1} · ${TOWER_FORMS[look.def.upgrades[0]].upgradeCost}`, dim: false };
   // Wave 1 has its own big START button; a lost game has TRY AGAIN.
   const wave = { hidden: game.wave === 0 || game.lost };
-  return { place, sell, wave };
+  return { place, sell, upgrade, wave };
 }
 
 /**
@@ -184,6 +190,7 @@ export class TouchControls {
       // removes the tower you're looking at. Everything else lives in the pause menu.
       case 'place': this.input.handlers.place?.(); break;
       case 'sell': this.input.handlers.sell?.(); break;
+      case 'upgrade': this.input.handlers.upgrade?.(); break;
       case 'wave': this.input.handlers.nextWave?.(); break;
       case 'pause': this.input.handlers.pause?.(); break;
     }
@@ -204,13 +211,14 @@ export class TouchControls {
   }
 
   /** Per-frame: relabel BUILD / SELL and show or hide NEXT WAVE from the game state. */
-  syncGame(game, build) {
-    const st = touchButtonState(game, build);
-    for (const name of ['place', 'sell']) {
+  syncGame(game, build, upgradeOpen = false) {
+    const st = touchButtonState(game, build, upgradeOpen);
+    for (const name of ['place', 'sell', 'upgrade']) {
       const b = this.buttons[name], v = st[name];
       this.setSub(name, v.sub);
       this.setFlag(b, 'dim', v.dim);
       this.setFlag(b, 'bad', !!v.bad);
+      this.setFlag(b, 'on', !!v.on);
     }
     this.setFlag(this.buttons.wave, 'hidden', st.wave.hidden);
   }

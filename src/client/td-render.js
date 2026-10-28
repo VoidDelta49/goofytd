@@ -1,6 +1,6 @@
 // three.js presentation for the tower-defence layer: instanced cows, tower
 // meshes built from each type's `parts`, the build ghost, spawn pads, shot
-// tracers, lobbed shells and splash puffs. Reads Game state; never writes it.
+// tracers, lobbed shells, butter slicks and splash puffs. Reads Game state; never writes it.
 
 import * as THREE from 'three';
 import { COW_TYPE_LIST } from '../sim/cows.js';
@@ -11,6 +11,9 @@ const PUFF_LIFE = 0.35;
 const MAX_TRACERS = 512;
 const MAX_SHELLS = 256;
 const MAX_PUFFS = 96;
+const MAX_ZONES = 64;
+/** Seconds an upgraded tower takes to settle from its pop. */
+const POP_TIME = 0.45;
 
 export class TdRenderer {
   /** @param {THREE.Scene} scene @param {import('../sim/game.js').Game} game */
@@ -41,6 +44,7 @@ export class TdRenderer {
     this.wingTmp = new THREE.Matrix4();
     this.flash = new THREE.Color(1, 0, 0);
     this.fuse = new THREE.Color(1, 0.95, 0.3);
+    this.goo = new THREE.Color(0.85, 0.62, 0.25);
 
     this.towerViews = new Map();
     this.ghosts = new Map();
@@ -64,6 +68,17 @@ export class TdRenderer {
     this.shellMesh.castShadow = true;
     this.shellMesh.count = 0;
     scene.add(this.shellMesh);
+
+    // Butter slicks: flat discs, fading out over their life.
+    this.zoneGeo = new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2);
+    this.zoneMeshes = [];
+    for (let k = 0; k < MAX_ZONES; k++) {
+      const m = new THREE.Mesh(this.zoneGeo, new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }));
+      m.visible = false;
+      m.renderOrder = 1;
+      scene.add(m);
+      this.zoneMeshes.push(m);
+    }
 
     // Puffs: kills, splashes, milk being drunk.
     this.puffs = [];
@@ -143,7 +158,7 @@ export class TdRenderer {
       if (e.kind === 'shot') {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ ...e, age: 0 });
       } else if (e.kind === 'splash') {
-        this.puff(e.x, 0.3, e.z, e.radius, e.color);
+        this.puff(e.x, e.y ?? 0.3, e.z, e.radius, e.color);
       } else if (e.kind === 'kill') {
         this.puff(e.x, 0.8, e.z, 0.9, 0xffffff);
       } else if (e.kind === 'drink') {
@@ -155,6 +170,14 @@ export class TdRenderer {
         this.puff(e.x, 0.8, e.z, 1.6, 0x6b5a46);
       }
     }
+  }
+
+  /** Level-up burst on a tower (upgrades happen outside tick(), so main.js calls this). */
+  upgradeBurst(t) {
+    const r = t.def.footprint;
+    this.puff(t.x, 0.4, t.z, r * 1.6, t.def.accent);
+    this.puff(t.x, t.def.height + 0.8, t.z, r * 1.1, 0xffffff);
+    this.puff(t.x, t.def.height + 1.6, t.z, r * 0.7, 0xffd84d);
   }
 
   puff(x, y, z, radius, color) {
@@ -174,11 +197,13 @@ export class TdRenderer {
    */
   update(alpha, frameDt, build) {
     this.time += frameDt;
+    this.frameDt = frameDt;
     this.syncCows(alpha);
     this.syncTowers();
     this.syncGhost(build);
     this.syncTracers(frameDt);
     this.syncShells(alpha);
+    this.syncZones();
     this.syncPuffs(frameDt);
   }
 
@@ -216,6 +241,7 @@ export class TdRenderer {
       // Type tint; Kaboom Cows flicker like a lit fuse; everything flashes red when hit.
       col.setHex(type.color);
       if (type.blastRadius > 0) col.lerp(this.fuse, 0.5 + 0.5 * Math.sin(this.time * 14 + c.id[i]));
+      if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       m.setColorAt(i, col);
     }
@@ -236,14 +262,31 @@ export class TdRenderer {
     }
     for (const t of towers.values()) {
       let view = this.towerViews.get(t.id);
-      if (!view) {
-        view = this.buildTowerModel(t.def, false);
-        view.position.set(t.x, 0, t.z);
-        this.scene.add(view);
-        this.towerViews.set(t.id, view);
+      // Upgrading swaps the tower's form: swap the model and pop it.
+      if (view && view.userData.def !== t.def) {
+        this.scene.remove(view);
+        view = null;
+        this.towerViews.set(t.id, this.newTowerView(t, POP_TIME));
+      }
+      if (!view) view = this.towerViews.get(t.id) ?? this.newTowerView(t, 0);
+      if (view.userData.pop > 0) {
+        view.userData.pop = Math.max(0, view.userData.pop - this.frameDt);
+        const s = view.userData.pop / POP_TIME;
+        // Squash and stretch: shoot up tall and thin, bounce back.
+        view.scale.set(1 - 0.18 * Math.sin(s * Math.PI), 1 + 0.35 * Math.sin(s * Math.PI), 1 - 0.18 * Math.sin(s * Math.PI));
       }
       view.userData.aim.rotation.y = Math.atan2(-t.aimX, -t.aimZ);
     }
+  }
+
+  newTowerView(t, pop) {
+    const view = this.buildTowerModel(t.def, false);
+    view.position.set(t.x, 0, t.z);
+    view.userData.def = t.def;
+    view.userData.pop = pop;
+    this.scene.add(view);
+    this.towerViews.set(t.id, view);
+    return view;
   }
 
   syncGhost(build) {
@@ -318,7 +361,7 @@ export class TdRenderer {
       const s = Math.min(1, (p.prevT + (p.t - p.prevT) * alpha) / p.T);
       o.position.set(
         p.x0 + (p.x1 - p.x0) * s,
-        p.y0 + (0.3 - p.y0) * s + 4 * p.arc * s * (1 - s),
+        p.y0 + ((p.y1 ?? 0.3) - p.y0) * s + 4 * p.arc * s * (1 - s),
         p.z0 + (p.z1 - p.z0) * s,
       );
       o.rotation.set(0, 0, 0);
@@ -328,6 +371,23 @@ export class TdRenderer {
     }
     m.count = n;
     m.instanceMatrix.needsUpdate = true;
+  }
+
+  syncZones() {
+    const zs = this.game.zones;
+    for (let k = 0; k < MAX_ZONES; k++) {
+      const m = this.zoneMeshes[k];
+      const z = zs[k];
+      m.visible = !!z;
+      if (!z) continue;
+      const s = z.t / z.T;
+      // Splat in fast, wobble a little, fade over the last third.
+      const grow = Math.min(1, z.t / 0.15);
+      m.position.set(z.x, 0.03 + k * 0.0005, z.z);
+      m.scale.setScalar(z.radius * grow * (1 + 0.03 * Math.sin(this.time * 5 + k)));
+      m.material.color.set(z.color);
+      m.material.opacity = 0.55 * Math.min(1, (1 - s) * 3);
+    }
   }
 
   syncPuffs(dt) {

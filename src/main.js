@@ -13,6 +13,7 @@ import { Sfx } from './client/audio.js';
 import { Input } from './client/input.js';
 import { Hud } from './client/hud.js';
 import { PauseMenu } from './client/menu.js';
+import { UpgradeMenu } from './client/upgrade-menu.js';
 
 const canvas = document.getElementById('game');
 const mapName = new URLSearchParams(location.search).get('map');
@@ -58,10 +59,52 @@ function sellTower() {
   else if (!build.lookTower) { say('Look at a tower to sell it'); sfx.play('deny'); }
 }
 
+// Upgrades: look at a tower, U / UPGRADE opens the panel for that tower. The game
+// keeps running. With the mouse captured, 1/2 buy the cards and U/Q close it.
+const upgrades = new UpgradeMenu(document.getElementById('upgrade'), {
+  buy: buyUpgrade,
+  sell: () => {
+    const t = upgrades.tower;
+    if (!t) return;
+    const refund = game.sellTower(t.id);
+    sfx.play('sell');
+    say(`Sold ${t.def.name} for ${refund}`);
+    closeUpgrades();
+  },
+  close: closeUpgrades,
+});
+
+function toggleUpgrades() {
+  if (upgrades.isOpen) { closeUpgrades(); return; }
+  const t = build.lookTower;
+  if (!t) { say('Look at a tower to upgrade it'); sfx.play('deny'); return; }
+  build.cancel();
+  upgrades.open(t, game);
+  sfx.play('select');
+}
+
+function closeUpgrades() {
+  if (!upgrades.isOpen) return;
+  upgrades.close();
+  sfx.play('select');
+}
+
+function buyUpgrade(formId) {
+  const t = upgrades.tower;
+  if (!t) return;
+  const r = game.upgradeTower(t.id, formId);
+  if (!r.ok) { sfx.play('deny'); upgrades.refuse(formId, r.reason); return; }
+  // upgradeTower() runs outside tick(), whose event list would be cleared: effects go here.
+  sfx.play('upgrade');
+  td.upgradeBurst(t);
+  upgrades.update(game);
+}
+
 /** Start over: wipe the run and put the player back at the start. Used by TRY AGAIN and the pause menu. */
 function restartGame() {
   game.reset();
   build.cancel();
+  upgrades.close();
   player.pending.respawn = true;
   sfx.play('select');
 }
@@ -105,9 +148,19 @@ function setPaused(p) {
 }
 
 input.handlers = {
-  selectTower: (n) => { build.select(n); sfx.play('select'); },
-  cancelBuild: () => { if (build.selected !== null) sfx.play('select'); build.cancel(); },
-  place: placeTower,
+  // With the upgrade panel open the number keys buy its cards instead of picking towers.
+  selectTower: (n) => {
+    if (upgrades.isOpen) { upgrades.pick(n); return; }
+    build.select(n);
+    sfx.play('select');
+  },
+  cancelBuild: () => {
+    if (upgrades.isOpen) { closeUpgrades(); return; }
+    if (build.selected !== null) sfx.play('select');
+    build.cancel();
+  },
+  place: () => { if (!upgrades.isOpen) placeTower(); }, // a click with the panel open does nothing
+  upgrade: toggleUpgrades,
   sell: sellTower,
   nextWave: startWave,
   pause: () => setPaused(!paused),
@@ -135,6 +188,7 @@ document.querySelector('[data-hud=buildbar]').addEventListener('pointerdown', (e
   if (!slot || paused) return;
   e.preventDefault();
   if (e.pointerType !== 'mouse') input.touch.enable();
+  if (upgrades.isOpen) closeUpgrades(); // picking a tower to build means you're done upgrading
   input.handlers.selectTower(Number(slot.dataset.n));
 });
 
@@ -172,7 +226,8 @@ function frame(now) {
 
   const eye = player.interpolatedEye(clock.alpha);
   build.update(now, eye, player.yaw, player.pitch);
-  input.touch.syncGame(game, build);
+  upgrades.update(game);
+  input.touch.syncGame(game, build, upgrades.isOpen);
   td.update(clock.alpha, frameDt, build);
   renderer.render(eye, player.yaw, player.pitch);
   hud.update(now, frameDt, player, cfg, input, game, build);
@@ -182,4 +237,4 @@ requestAnimationFrame(frame);
 
 // Handy from the dev console: tweak movement live, e.g. goofytd.cfg.airAccel = 20,
 // or the match: goofytd.game.money = 9999, goofytd.game.startWave()
-window.goofytd = { cfg, player, world, renderer, input, level, game, build, td, sfx };
+window.goofytd = { cfg, player, world, renderer, input, level, game, build, td, sfx, upgrades };

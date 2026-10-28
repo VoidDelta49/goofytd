@@ -213,7 +213,7 @@ test('fullscreen lock: on by default, ?fs=0 opts out and is remembered, ?fs=1 op
 
 import { touchButtonState } from '../src/client/touch.js';
 import { PauseMenu, RESTART_CONFIRM_MS } from '../src/client/menu.js';
-import { TOWER_TYPES, SELL_REFUND } from '../src/sim/towers.js';
+import { TOWER_TYPES, TOWER_FORMS, SELL_REFUND } from '../src/sim/towers.js';
 
 test('touch buttons: BUILD / SELL explain themselves and only light up when usable', () => {
   const id = Object.keys(TOWER_TYPES)[0];
@@ -230,8 +230,20 @@ test('touch buttons: BUILD / SELL explain themselves and only light up when usab
   const poor = touchButtonState({ ...game, money: def.cost - 1 }, { selected: id, lookTower: null, preview: { ok: true } });
   assert(poor.place.bad && poor.place.sub === 'need more moolah', 'BUILD should say when moolah is short');
 
-  const sell = touchButtonState(game, { selected: null, lookTower: { spent: 100 }, preview: null });
+  const sell = touchButtonState(game, { selected: null, lookTower: { spent: 100, def }, preview: null });
   assert(!sell.sell.dim && sell.sell.sub === `+${Math.floor(100 * SELL_REFUND)} moolah`, `SELL refund text: ${sell.sell.sub}`);
+});
+
+test('touch buttons: UPGRADE names the next level, a path choice, or MAXED', () => {
+  const game = { money: 1000, wave: 3, lost: false };
+  const at = (formId) => touchButtonState(game, { selected: null, lookTower: { spent: 0, def: TOWER_FORMS[formId] }, preview: null }).upgrade;
+  assert(touchButtonState(game, { selected: null, lookTower: null, preview: null }).upgrade.dim, 'nothing to upgrade');
+  const next = TOWER_FORMS[TOWER_FORMS.squirter.upgrades[0]];
+  assert(at('squirter').sub === `LV 2 · ${next.upgradeCost}` && !at('squirter').dim, `buff text: ${at('squirter').sub}`);
+  assert(at('squirter3').sub === 'pick a path!', 'variant choice');
+  assert(at('gatling2').sub === 'MAXED' && at('gatling2').dim, 'maxed');
+  const open = touchButtonState(game, { selected: null, lookTower: null, preview: null }, true).upgrade;
+  assert(open.on && open.sub === 'close', 'open panel: the button closes it');
 });
 
 test('touch buttons: NEXT WAVE hides before wave 1 (START button) and after losing (TRY AGAIN)', () => {

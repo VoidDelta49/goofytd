@@ -107,8 +107,11 @@ export class CowPool {
     this.hitAge = new Float64Array(capacity);
     /** Stable id, so the renderer or a replay can tell cows apart. */
     this.id = new Uint32Array(capacity);
+    /** Slowed (molasses, butter slick, glue): speed × slowF for slowT more seconds. */
+    this.slowT = new Float64Array(capacity);
+    this.slowF = new Float64Array(capacity);
     this.nextId = 1;
-    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.type, this.hitAge, this.id];
+    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.type, this.hitAge, this.id, this.slowT, this.slowF];
   }
 
   /** Returns the slot, or -1 when full. */
@@ -124,6 +127,8 @@ export class CowPool {
     this.type[i] = type.index;
     this.hitAge[i] = Infinity;
     this.id[i] = this.nextId++;
+    this.slowT[i] = 0;
+    this.slowF[i] = 1;
     return i;
   }
 

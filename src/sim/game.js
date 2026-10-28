@@ -7,7 +7,7 @@ import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
 import { CowPool, COW_TYPE_LIST, waveMix, pickFromMix } from './cows.js';
-import { SELL_REFUND, TOWER_TYPES } from './towers.js';
+import { SELL_REFUND, TOWER_TYPES, TOWER_FORMS } from './towers.js';
 import { mulberry32 } from './rng.js';
 
 export const CELL = 2;
@@ -42,6 +42,14 @@ export const PlaceError = Object.freeze({
   Cow: 'a cow is standing there',
   Player: "you're standing there",
   BlocksPath: 'that would block every path to the milk',
+  Money: 'not enough moolah',
+});
+
+/** Why an upgrade didn't happen; the upgrade panel shows these. */
+export const UpgradeError = Object.freeze({
+  NoTower: 'that tower is gone',
+  GameOver: 'the milk is gone',
+  NotAnUpgrade: "that isn't an upgrade for this tower",
   Money: 'not enough moolah',
 });
 
@@ -80,6 +88,8 @@ export class Game {
     this.nextTowerId = 1;
     this.cows.clear();
     this.projectiles = [];
+    /** Butter slicks on the ground: { x, z, radius, t, T, dps, slow, tower, color }. */
+    this.zones = [];
     /** Things that happened this tick, for effects and sounds. The client drains it. */
     this.events = [];
     this.money = this.cfg.startMoney;
@@ -155,6 +165,7 @@ export class Game {
     this.updateCows(dt);
     this.updateTowers(dt);
     this.updateProjectiles(dt);
+    this.updateZones(dt);
   }
 
   updateCows(dt) {
@@ -183,8 +194,13 @@ export class Game {
       }
       const dx = tx - x, dz = tz - z;
       const len = Math.sqrt(dx * dx + dz * dz);
-      const wx = len > 1e-9 ? (dx / len) * type.speed : 0;
-      const wz = len > 1e-9 ? (dz / len) * type.speed : 0;
+      let speed = type.speed;
+      if (cows.slowT[i] > 0) {
+        speed *= cows.slowF[i];
+        cows.slowT[i] -= dt;
+      }
+      const wx = len > 1e-9 ? (dx / len) * speed : 0;
+      const wz = len > 1e-9 ? (dz / len) * speed : 0;
       // Ease velocity toward the wish so turns at cell corners look like turning.
       cows.vx[i] += (wx - cows.vx[i]) * turn;
       cows.vz[i] += (wz - cows.vz[i]) * turn;
@@ -220,14 +236,15 @@ export class Game {
 
   /**
    * Kaboom: the cow at slot i blows up, wrecking every tower within its
-   * blastRadius (no refund) and taking itself out (no bounty, no milk lost).
+   * blastRadius (no refund; blast-proof ones shrug it off) and taking itself
+   * out (no bounty, no milk lost).
    * Only call while iterating cows backwards (or not at all).
    */
   explodeCow(i, type) {
     const x = this.cows.x[i], z = this.cows.z[i];
     const r2 = type.blastRadius * type.blastRadius;
     const wrecked = [];
-    for (const t of this.towers.values()) if (boxDist2(t.aabb, x, z) <= r2) wrecked.push(t);
+    for (const t of this.towers.values()) if (!t.def.blastProof && boxDist2(t.aabb, x, z) <= r2) wrecked.push(t);
     for (const t of wrecked) this.removeTower(t);
     if (wrecked.length) this.grid.rebuild();
     this.events.push({ kind: 'boom', x, z, radius: type.blastRadius, wrecked: wrecked.length });
@@ -242,10 +259,20 @@ export class Game {
       t.cooldown -= dt;
       if (t.cooldown > 0) continue;
       const target = def.targeting(this, t);
-      if (target < 0) { t.cooldown = 0; continue; }
+      if (target < 0) {
+        t.cooldown = 0;
+        if (def.spinDown > 0) t.charge = Math.max(0, t.charge - def.spinDown * dt);
+        continue;
+      }
       this.aimAt(t, this.cows.x[target], this.cows.z[target]);
       def.attack(this, t, target);
-      t.cooldown += def.interval;
+      if (def.minInterval > 0) {
+        // Spin-up gun: the gap shrinks from interval to minInterval as it charges.
+        t.cooldown += def.interval + (def.minInterval - def.interval) * t.charge;
+        t.charge = Math.min(1, t.charge + def.spinUp);
+      } else {
+        t.cooldown += def.interval;
+      }
     }
   }
 
@@ -270,30 +297,76 @@ export class Game {
       p.prevT = p.t;
       p.t += dt;
       if (p.t < p.T) continue;
-      this.splash(p.x1, p.z1, p.radius, p.damage, this.towers.get(p.tower));
-      this.events.push({ kind: 'splash', x: p.x1, z: p.z1, radius: p.radius, color: p.color });
+      this.splash(p.x1, p.z1, p.radius, p.damage, this.towers.get(p.tower), p.air);
+      this.events.push({ kind: 'splash', x: p.x1, y: p.y1, z: p.z1, radius: p.radius, color: p.color, air: p.air });
+      if (p.slick) {
+        const s = p.slick;
+        this.zones.push({ x: p.x1, z: p.z1, radius: s.radius, t: 0, T: s.time, dps: s.dps, slow: s.slow, tower: p.tower, color: p.color });
+      }
       ps[k] = ps[ps.length - 1];
       ps.pop();
     }
   }
 
-  /** Damage every cow within `radius` of (x, z). */
-  splash(x, z, radius, damage, tower) {
+  /**
+   * Butter slicks: slow and grease every walking cow standing in one.
+   * Puddles don't stack: a cow in several takes only the strongest one's
+   * damage and slow (otherwise overlapping shells multiplied the damage).
+   */
+  updateZones(dt) {
+    const { zones, cows } = this;
+    for (let k = zones.length - 1; k >= 0; k--) {
+      zones[k].t += dt;
+      if (zones[k].t >= zones[k].T) {
+        zones[k] = zones[zones.length - 1];
+        zones.pop();
+      }
+    }
+    if (!zones.length) return;
+    for (let i = cows.count - 1; i >= 0; i--) {
+      const type = COW_TYPE_LIST[cows.type[i]];
+      if (type.altitude > 0) continue;
+      let best = null;
+      for (const zn of zones) {
+        const dx = cows.x[i] - zn.x, dz = cows.z[i] - zn.z;
+        const r = zn.radius + type.radius;
+        if (dx * dx + dz * dz <= r * r && (!best || zn.dps > best.dps)) best = zn;
+      }
+      if (!best) continue;
+      this.slowCow(i, best.slow, 0.2);
+      this.damageCow(i, best.dps * dt, this.towers.get(best.tower), false);
+    }
+  }
+
+  /** Slow cow i to `factor` of its speed for `time` s. A weaker slow never overrides a stronger running one. */
+  slowCow(i, factor, time) {
+    const { cows } = this;
+    if (cows.slowT[i] <= 0 || factor <= cows.slowF[i]) {
+      cows.slowF[i] = factor;
+      if (time > cows.slowT[i]) cows.slowT[i] = time;
+    }
+  }
+
+  /** Damage every cow within `radius` of (x, z): flyers for an airburst (`air`), otherwise walkers. */
+  splash(x, z, radius, damage, tower, air = false) {
     const { cows } = this;
     for (let i = cows.count - 1; i >= 0; i--) {
       const type = COW_TYPE_LIST[cows.type[i]];
-      if (type.altitude > 0) continue; // shells land on the ground, under flyers
+      if ((type.altitude > 0) !== air) continue; // ground shells land under flyers; airbursts go off over walkers
       const dx = cows.x[i] - x, dz = cows.z[i] - z;
       const r = radius + type.radius;
       if (dx * dx + dz * dz <= r * r) this.damageCow(i, damage, tower);
     }
   }
 
-  /** Returns true if the cow died. Only call while iterating cows backwards (or not at all). */
-  damageCow(i, damage, tower) {
+  /**
+   * Returns true if the cow died. Only call while iterating cows backwards (or not at all).
+   * `flash` false for damage over time (a slick), so cows don't strobe red.
+   */
+  damageCow(i, damage, tower, flash = true) {
     const { cows } = this;
     cows.hp[i] -= damage;
-    cows.hitAge[i] = 0;
+    if (flash) cows.hitAge[i] = 0;
     if (cows.hp[i] > 0) return false;
     const type = COW_TYPE_LIST[cows.type[i]];
     this.money += type.bounty;
@@ -379,7 +452,7 @@ export class Game {
     const id = this.nextTowerId++;
     const t = {
       id, def: p.type, x: p.x, z: p.z, cx: p.cx, cz: p.cz, cells: p.cells, aabb: p.aabb,
-      cooldown: 0, kills: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
+      cooldown: 0, charge: 0, kills: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
       spent: p.type.cost,
     };
     this.aimAt(t, t.x, t.z - 1);
@@ -390,6 +463,28 @@ export class Game {
     this.money -= p.type.cost;
     this.events.push({ kind: 'built', tower: id });
     return t;
+  }
+
+  /**
+   * Turn tower `id` into form `formId` (one of its def.upgrades), paying the
+   * upgrade cost. The tower keeps its place, kills and cooldown; selling it
+   * later refunds part of everything spent. Returns { ok, reason, tower }.
+   */
+  upgradeTower(id, formId) {
+    const t = this.towers.get(id);
+    if (!t) return { ok: false, reason: UpgradeError.NoTower };
+    if (this.lost) return { ok: false, reason: UpgradeError.GameOver, tower: t };
+    const next = TOWER_FORMS[formId];
+    if (!next || !t.def.upgrades.includes(formId)) return { ok: false, reason: UpgradeError.NotAnUpgrade, tower: t };
+    if (this.money < next.upgradeCost) return { ok: false, reason: UpgradeError.Money, tower: t };
+    this.money -= next.upgradeCost;
+    t.spent += next.upgradeCost;
+    t.def = next;
+    t.charge = 0;
+    t.cooldown = Math.min(t.cooldown, next.interval);
+    this.aimAt(t, t.x + t.aimX, t.z + t.aimZ); // the muzzle may have moved
+    this.events.push({ kind: 'upgraded', tower: id, form: formId });
+    return { ok: true, reason: null, tower: t };
   }
 
   /** Sell for SELL_REFUND of the price. Returns the refund, or 0 if there was no such tower. */

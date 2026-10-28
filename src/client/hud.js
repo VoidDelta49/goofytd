@@ -109,7 +109,10 @@ export class Hud {
         : `${p.type.name}: ${p.reason}`;
     } else if (build.lookTower) {
       const t = build.lookTower;
-      place = `${t.def.name} · ${t.kills} kills · ${this.touchUi ? 'tap SELL' : 'X'} sells for ${Math.floor(t.spent * SELL_REFUND)}`;
+      // Touch: the UPGRADE and SELL buttons already say what they'd do.
+      place = this.touchUi
+        ? `${t.def.name} LV ${t.def.level} · ${t.kills} kills`
+        : `${t.def.name} LV ${t.def.level} · ${t.kills} kills · ${t.def.upgrades.length ? 'U upgrade' : 'MAX'} · X sells for ${Math.floor(t.spent * SELL_REFUND)}`;
     }
     setText(this.placeEl, place);
     this.placeEl.classList.toggle('bad', !!build.preview && !build.preview.ok);

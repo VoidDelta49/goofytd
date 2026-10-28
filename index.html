@@ -12,26 +12,27 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-        "./src/client/audio.js": "./src/client/audio.js?v=aeaae7c4dc",
+        "./src/client/audio.js": "./src/client/audio.js?v=addf9a2add",
         "./src/client/build.js": "./src/client/build.js?v=a43dbf97b5",
-        "./src/client/hud.js": "./src/client/hud.js?v=82f0087ad8",
-        "./src/client/input.js": "./src/client/input.js?v=ad7b8a2972",
+        "./src/client/hud.js": "./src/client/hud.js?v=8496fd56d5",
+        "./src/client/input.js": "./src/client/input.js?v=7ee3472989",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
         "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
         "./src/client/render.js": "./src/client/render.js?v=b3d15c77e4",
-        "./src/client/td-render.js": "./src/client/td-render.js?v=d33bb02add",
-        "./src/client/touch.js": "./src/client/touch.js?v=95df11ef0c",
+        "./src/client/td-render.js": "./src/client/td-render.js?v=df149726f5",
+        "./src/client/touch.js": "./src/client/touch.js?v=d975603b30",
+        "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=31164aaee0",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=68949067b8",
+        "./src/main.js": "./src/main.js?v=29bc60394c",
         "./src/player.js": "./src/player.js?v=7536aa98e4",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
-        "./src/sim/cows.js": "./src/sim/cows.js?v=41e26e073e",
-        "./src/sim/game.js": "./src/sim/game.js?v=f88b957388",
+        "./src/sim/cows.js": "./src/sim/cows.js?v=5ff115e9ac",
+        "./src/sim/game.js": "./src/sim/game.js?v=72775f880b",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
-        "./src/sim/towers.js": "./src/sim/towers.js?v=692c8c8121",
+        "./src/sim/towers.js": "./src/sim/towers.js?v=9b531a3c66",
         "./src/sim/vec3.js": "./src/sim/vec3.js?v=0643c68bb6"
       }
     }
@@ -164,6 +165,14 @@
     #touch [data-touch=sell] { bottom: calc(130px + env(safe-area-inset-bottom)); }
     #touch [data-touch=place] { bottom: calc(186px + env(safe-area-inset-bottom)); }
     #touch [data-touch=place]:not(.dim):not(.bad) { border-color: #ffd84d; }
+    /* UPGRADE sits left of SELL (landscape), above BUILD in portrait where the left side is the stick's. */
+    #touch [data-touch=upgrade] {
+      width: 112px; height: 50px; right: calc(132px + env(safe-area-inset-right)); bottom: calc(130px + env(safe-area-inset-bottom));
+    }
+    #touch [data-touch=upgrade]:not(.dim) { border-color: #8fd8ff; }
+    @media (orientation: portrait) {
+      #touch [data-touch=upgrade] { right: calc(14px + env(safe-area-inset-right)); bottom: calc(242px + env(safe-area-inset-bottom)); }
+    }
     /* PAUSE and NEXT WAVE sit in the top-right corner, above the milk and moolah readout. */
     #touch [data-touch=pause], #touch [data-touch=wave] {
       height: 38px; top: calc(10px + env(safe-area-inset-top)); padding: 0 12px; flex-direction: row;
@@ -187,7 +196,7 @@
     @media (orientation: portrait) {
       body.touch-device #hud [data-hud=buildbar] {
         right: auto; left: 50%; transform: translateX(-50%); justify-content: center;
-        bottom: calc(248px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px);
+        bottom: calc(304px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px);
       }
       /* The long stats line would run under NEXT WAVE / PAUSE; speed stays. */
       body.touch-device #hud [data-hud=info] { display: none; }
@@ -223,6 +232,167 @@
     #pause .primary { border-color: #ffd84d; color: #ffd84d; font-size: 18px; min-height: 52px; }
     #pause .danger { border-color: #ff8a8a; color: #ff8a8a; }
     #pause .danger.armed { background: #ff8a8a; color: #200; }
+    /* Upgrade panel. Landscape / desktop: a sheet down the left side, leaving the right-hand thumb buttons free.
+       Portrait: a bottom sheet over the thumb buttons. Everything inside cascades in (staggered by --i / --j). */
+    #upgrade {
+      position: fixed; inset: 0; z-index: 6; pointer-events: none;
+      font: 600 13px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #fff;
+    }
+    #upgrade[hidden] { display: none; }
+    #upgrade .up-sheet {
+      --accent: #ffd84d;
+      position: absolute; pointer-events: auto; touch-action: pan-y; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain;
+      left: calc(10px + env(safe-area-inset-left)); top: calc(10px + env(safe-area-inset-top)); bottom: calc(10px + env(safe-area-inset-bottom));
+      width: min(480px, calc(100vw - 254px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+      padding: 12px; border-radius: 16px; border: 2px solid color-mix(in srgb, var(--accent) 55%, #fff3);
+      background: linear-gradient(160deg, #22222ef2, #14141cf2 60%); box-shadow: 0 10px 40px #0009, 0 0 0 1px #0006;
+      display: flex; flex-direction: column; gap: 10px;
+      animation: upSheetSide 300ms cubic-bezier(.2, 1.2, .35, 1) both;
+    }
+    body:not(.touch-device) #upgrade .up-sheet { top: 50%; bottom: auto; max-height: calc(100vh - 40px); transform: translateY(-50%); animation-name: upSheetDesk; left: calc(24px + env(safe-area-inset-left)); }
+    #upgrade.closing .up-sheet { animation: upSheetOut 170ms ease-in both; }
+    body:not(.touch-device) #upgrade.closing .up-sheet { animation-name: upSheetOutDesk; }
+    @keyframes upSheetSide { from { opacity: 0; transform: translateX(-40px) scale(.96); } }
+    @keyframes upSheetDesk { from { opacity: 0; transform: translate(-40px, -50%) scale(.96); } }
+    @keyframes upSheetOut { to { opacity: 0; transform: translateX(-30px) scale(.97); } }
+    @keyframes upSheetOutDesk { to { opacity: 0; transform: translate(-30px, -50%) scale(.97); } }
+    @media (orientation: portrait) {
+      body.touch-device #upgrade .up-sheet {
+        left: 0; right: 0; top: auto; bottom: 0; width: auto; max-height: 76vh;
+        padding: 14px 12px calc(12px + env(safe-area-inset-bottom)); border-radius: 20px 20px 0 0; border-bottom: none;
+        animation-name: upSheetUp;
+      }
+      body.touch-device #upgrade.closing .up-sheet { animation-name: upSheetDown; }
+      /* A grab handle, so it reads as a sheet. */
+      body.touch-device #upgrade .up-sheet::before {
+        content: ''; align-self: center; width: 44px; height: 5px; margin: -6px 0 -2px; border-radius: 3px; background: #fff4;
+      }
+    }
+    @keyframes upSheetUp { from { opacity: 0.4; transform: translateY(100%); } }
+    @keyframes upSheetDown { to { opacity: 0.4; transform: translateY(100%); } }
+    #upgrade header { display: flex; align-items: center; gap: 10px; }
+    #upgrade .title { flex: 1; min-width: 0; }
+    #upgrade .tname { font-size: 19px; font-weight: 800; color: var(--accent); letter-spacing: .5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #upgrade .up-sheet.bought .tname { animation: upTitle 700ms ease-out; }
+    @keyframes upTitle { 0% { transform: scale(1.25); text-shadow: 0 0 18px var(--accent); } 100% { transform: none; } }
+    #upgrade .pips { display: flex; align-items: center; gap: 5px; margin-top: 4px; }
+    #upgrade .pip { width: 12px; height: 12px; border-radius: 3px; background: #fff2; border: 1px solid #fff3; transform: rotate(45deg) scale(.8); }
+    #upgrade .pip.on { background: var(--accent); border-color: transparent; box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent); }
+    #upgrade .pip.star { border-radius: 50%; transform: none; }
+    #upgrade .pip.pop { animation: upPip 600ms cubic-bezier(.2, 2, .4, 1) 200ms both; }
+    @keyframes upPip { 0% { transform: scale(0) rotate(45deg); } 100% { transform: rotate(45deg) scale(.8); } }
+    #upgrade .pip.star.pop { animation-name: upPipStar; }
+    @keyframes upPipStar { 0% { transform: scale(0); } }
+    #upgrade .lv { margin-left: 6px; font-size: 11px; opacity: .8; letter-spacing: 1px; }
+    #upgrade button {
+      font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; border-radius: 10px;
+      border: 2px solid #fff5; background: #fff1; padding: 0 12px; min-height: 40px;
+    }
+    #upgrade button:hover { background: #fff2; }
+    #upgrade .x { width: 44px; height: 44px; flex: none; padding: 0; font-size: 18px; border-radius: 50%; }
+    #upgrade .stats { display: flex; flex-wrap: wrap; gap: 5px; }
+    #upgrade .stat {
+      display: flex; gap: 6px; align-items: baseline; padding: 3px 8px; border-radius: 8px; background: #fff1;
+      animation: upRow 260ms ease-out both; animation-delay: calc(var(--i) * 35ms + 60ms);
+    }
+    #upgrade .stat span { font-size: 11px; opacity: .7; font-weight: 500; }
+    @keyframes upRow { from { opacity: 0; transform: translateY(8px); } }
+    #upgrade .choose {
+      text-align: center; font-size: 13px; letter-spacing: 3px; color: #ffd84d; font-weight: 800;
+      animation: upRow 300ms ease-out 120ms both;
+    }
+    #upgrade .choose small { display: block; font-size: 10px; letter-spacing: 0; opacity: .7; font-weight: 500; }
+    #upgrade .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; perspective: 900px; }
+    #upgrade .card {
+      --accent: #ffd84d;
+      position: relative; display: flex; flex-direction: column; gap: 5px; padding: 10px; border-radius: 13px;
+      border: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+      background: linear-gradient(170deg, color-mix(in srgb, var(--accent) 22%, #1d1d28), #18181f 70%);
+      transform-origin: 50% 100%;
+      animation: upCard 480ms cubic-bezier(.2, 1.25, .35, 1) both; animation-delay: calc(var(--i) * 110ms + 140ms);
+    }
+    @keyframes upCard { from { opacity: 0; transform: translateY(34px) rotateX(-28deg) scale(.9); } }
+    /* Variants shimmer: a sweep of light across the card every few seconds. */
+    #upgrade .card.variant::after {
+      content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(105deg, transparent 35%, #fff3 50%, transparent 65%) no-repeat;
+      background-size: 250% 100%; background-position: 130% 0;
+      animation: upShine 3.2s ease-in-out infinite; animation-delay: calc(var(--i) * 400ms + 900ms);
+    }
+    @keyframes upShine { 0%, 55% { background-position: 130% 0; } 100% { background-position: -30% 0; } }
+    #upgrade .badge {
+      align-self: flex-start; padding: 2px 7px; border-radius: 6px; font-size: 10px; letter-spacing: 1px; font-weight: 800;
+      background: var(--accent); color: #1a1a1a;
+    }
+    #upgrade .cname { font-size: 16px; font-weight: 800; }
+    #upgrade .card p { margin: 0; font-size: 11px; font-weight: 500; opacity: .85; line-height: 1.35; }
+    #upgrade .card ul { list-style: none; margin: 2px 0 0; padding: 0; display: grid; gap: 2px; }
+    #upgrade .card li {
+      display: flex; align-items: baseline; gap: 6px; font-size: 12px;
+      animation: upDelta 300ms ease-out both; animation-delay: calc(var(--i) * 110ms + 330ms + var(--j) * 55ms);
+    }
+    @keyframes upDelta { from { opacity: 0; transform: translateX(-12px); } }
+    #upgrade .card li span { flex: 1; opacity: .75; font-weight: 500; }
+    #upgrade .card li s { opacity: .5; font-weight: 500; }
+    #upgrade .card li s::after { content: ' →'; display: inline-block; text-decoration: none; }
+    #upgrade .card li.up b { color: #7dff8a; }
+    #upgrade .card li.up b::after { content: ' ▲'; font-size: 9px; }
+    #upgrade .card li.down b { color: #ff8a8a; }
+    #upgrade .card li.down b::after { content: ' ▼'; font-size: 9px; }
+    #upgrade .card li b.new { color: #8fd8ff; }
+    #upgrade .card li.up b.new::after { content: ' NEW'; font-size: 9px; }
+    #upgrade .card button {
+      margin-top: auto; min-height: 44px; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 25%, transparent);
+      font-weight: 800; letter-spacing: 1px;
+    }
+    #upgrade .card button:active { transform: scale(.96); }
+    #upgrade .price { color: #ffd84d; }
+    #upgrade .card.poor button { border-color: #fff3; background: #fff1; opacity: .7; }
+    #upgrade .card.poor .price { color: #ff8a8a; }
+    #upgrade .card.shake { animation: upShake 380ms ease-in-out; }
+    @keyframes upShake { 20%, 60% { transform: translateX(-7px); } 40%, 80% { transform: translateX(7px); } }
+    #upgrade .card.maxed { text-align: center; align-items: center; padding: 16px; }
+    #upgrade .card.maxed .badge { align-self: center; animation: upGlow 1.6s ease-in-out infinite; }
+    @keyframes upGlow { 50% { box-shadow: 0 0 14px var(--accent); } }
+    #upgrade kbd { padding: 0 5px; margin-right: 6px; border: 1px solid #fff8; border-radius: 4px; background: #0003; font: inherit; font-size: 11px; }
+    #upgrade footer { display: flex; align-items: center; gap: 8px; animation: upRow 300ms ease-out 260ms both; }
+    #upgrade .kills { font-size: 11px; opacity: .7; }
+    #upgrade .up-msg { flex: 1; text-align: center; font-size: 12px; color: #7dff8a; opacity: 0; }
+    #upgrade .up-msg.bad { color: #ff8a8a; }
+    #upgrade .up-msg.show { animation: upMsg 1.8s ease-out both; }
+    @keyframes upMsg { 0% { opacity: 0; transform: translateY(6px); } 12%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; } }
+    #upgrade .sell { border-color: #ff8a8a; color: #ffb0b0; }
+    #upgrade .keys { text-align: center; font-size: 11px; opacity: .7; font-weight: 500; }
+    /* Short landscape phones: every card already shows from → to, so the stats row goes and the
+       cards tighten until the UPGRADE buttons fit without scrolling. */
+    @media (max-height: 450px) {
+      #upgrade .up-sheet { padding: 8px 10px; gap: 6px; }
+      #upgrade .tname { font-size: 15px; }
+      #upgrade .pips { margin-top: 2px; }
+      #upgrade .x { width: 36px; height: 36px; font-size: 15px; }
+      #upgrade .stats, #upgrade .choose small, #upgrade .keys { display: none; }
+      #upgrade .choose { font-size: 11px; }
+      #upgrade .cards { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 7px; }
+      #upgrade .card { padding: 7px 8px; gap: 3px; }
+      #upgrade .cname { font-size: 14px; }
+      #upgrade .badge { font-size: 9px; padding: 1px 6px; }
+      #upgrade .card p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; font-size: 10px; }
+      #upgrade .card li { font-size: 11px; }
+      #upgrade .card li:nth-child(n+5) { display: none; }
+      #upgrade .card button { min-height: 36px; }
+      #upgrade button { min-height: 34px; }
+    }
+    @media (max-height: 340px) {
+      #upgrade .card p { -webkit-line-clamp: 1; }
+      #upgrade .card li:nth-child(n+4) { display: none; }
+    }
+    /* While upgrading, the look-at text under the crosshair would only show through the sheet. */
+    body.upgrading #hud [data-hud=place] { display: none; }
+    /* Touch: the look-at text wraps instead of running under the thumb buttons. */
+    body.touch-device #hud [data-hud=place] { white-space: normal; text-align: center; max-width: min(46vw, 320px); font-size: 13px; }
+    @media (prefers-reduced-motion: reduce) {
+      #upgrade *, #upgrade .up-sheet, #upgrade *::after { animation: none !important; }
+    }
     @media (max-height: 450px) {
       #pause .panel { gap: 6px; padding: 10px; }
       #pause h2 { font-size: 18px; }
@@ -260,11 +430,11 @@
       <b class="desk-only">Click to play</b>
       <b class="touch-only">Tap to play</b>
       <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
-      <div class="desk-only"><kbd>1</kbd>–<kbd>3</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
+      <div class="desk-only"><kbd>1</kbd>–<kbd>3</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
       <div class="desk-only"><kbd>P</kbd> pause · <kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>M</kbd> mute · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
       <div class="touch-only">Left thumb: move · drag the right side to look</div>
       <div class="touch-only">Drag from the jump button to steer mid-air</div>
-      <div class="touch-only">Tap a tower in the bar, aim, then BUILD · SELL removes the tower you look at</div>
+      <div class="touch-only">Tap a tower in the bar, aim, then BUILD · look at a tower to UPGRADE or SELL it</div>
       <div class="touch-only">❚❚ PAUSE opens sound, look speed, restart and more</div>
     </div>
   </div>
@@ -275,9 +445,11 @@
     <button data-touch="crouch" aria-label="Crouch (tap to switch on or off)"><b>CROUCH</b><small>tap on/off</small></button>
     <button class="pill" data-touch="place" aria-label="Build the selected tower where you are aiming"><b>BUILD</b><small>pick a tower</small></button>
     <button class="pill" data-touch="sell" aria-label="Sell the tower you are looking at"><b>SELL</b><small>look at a tower</small></button>
+    <button class="pill" data-touch="upgrade" aria-label="Upgrade the tower you are looking at"><b>UPGRADE</b><small>look at a tower</small></button>
     <button class="pill" data-touch="wave" aria-label="Start the next wave now" hidden><b>▶▶ NEXT WAVE</b></button>
     <button class="pill" data-touch="pause" aria-label="Pause and open the menu"><b>❚❚ PAUSE</b></button>
   </div>
+  <div id="upgrade" hidden><div class="up-sheet" role="dialog" aria-label="Tower upgrades"></div></div>
   <div id="pause" hidden>
     <div class="panel">
       <h2>PAUSED</h2>
