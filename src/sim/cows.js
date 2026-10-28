@@ -13,6 +13,16 @@
  *                towers with hitsAir can shoot it (splash lands under it)
  *   blastRadius  > 0 means it explodes when it walks up to a tower, wrecking
  *                every tower within this many metres (no refund)
+ *   armor        flat damage taken off every direct hit (never below 25% of
+ *                the hit); damage over time (slicks) ignores it
+ *   splitInto, splitCount   on death, this many cows of type splitInto pop
+ *                out where it fell (at the current wave's HP)
+ *   enrageBelow, enrageSpeed   under this fraction of its max HP it runs at
+ *                speed × enrageSpeed
+ *   healRate, healRadius   every HEAL_PULSE s, other cows within healRadius m
+ *                get healRate × HEAL_PULSE of their max HP back
+ *   camo         towers can't pick it as a target until it's within this many
+ *                metres (splash, spray and auras still hit it)
  *   firstWave, weight   when it starts showing up in waves, and how often
  *                relative to the others (see waveMix)
  */
@@ -20,14 +30,19 @@ export const COW_TYPES = {};
 /** Index -> type, so a cow stores its type as a small integer. */
 export const COW_TYPE_LIST = [];
 
+/** Seconds between a Vet Cow's heals. */
+export const HEAL_PULSE = 0.5;
+
 export function defineCow(def) {
   for (const k of ['id', 'hp', 'speed', 'bounty', 'damage', 'radius']) {
     if (def[k] === undefined) throw new Error(`cow type ${def.id}: missing ${k}`);
   }
+  if (def.splitInto && !(def.splitCount > 0)) throw new Error(`cow type ${def.id}: splitInto needs splitCount`);
   if (COW_TYPES[def.id]) throw new Error(`cow type ${def.id} defined twice`);
   if (COW_TYPE_LIST.length >= 256) throw new Error('too many cow types (stored as a byte)');
   const t = Object.freeze({
     name: def.id, scale: 1, color: 0xffffff, altitude: 0, blastRadius: 0, firstWave: 1, weight: 1,
+    armor: 0, splitInto: null, splitCount: 0, enrageBelow: 0, enrageSpeed: 1, healRate: 0, healRadius: 0, camo: 0,
     ...def, index: COW_TYPE_LIST.length,
   });
   COW_TYPES[def.id] = t;
@@ -82,6 +97,31 @@ defineCow({
   blastRadius: 2.6, firstWave: 6, weight: 2,
 });
 
+defineCow({
+  id: 'tin', name: 'Tin Cow', hp: 60, speed: 2.6, bounty: 9, damage: 8, radius: 0.6, scale: 1.1, color: 0xb8c4cc,
+  armor: 4, firstWave: 7, weight: 2,
+});
+
+defineCow({
+  id: 'mama', name: 'Mama Cow', hp: 70, speed: 2.8, bounty: 6, damage: 8, radius: 0.65, scale: 1.25, color: 0xffc8dc,
+  splitInto: 'calf', splitCount: 3, firstWave: 8, weight: 2,
+});
+
+defineCow({
+  id: 'bull', name: 'Raging Bull', hp: 80, speed: 3.0, bounty: 10, damage: 10, radius: 0.65, scale: 1.2, color: 0x9a5434,
+  enrageBelow: 0.5, enrageSpeed: 2.2, firstWave: 9, weight: 2,
+});
+
+defineCow({
+  id: 'vet', name: 'Vet Cow', hp: 50, speed: 3.0, bounty: 12, damage: 5, radius: 0.55, scale: 1, color: 0xa8ffb8,
+  healRate: 0.06, healRadius: 4.5, firstWave: 10, weight: 1,
+});
+
+defineCow({
+  id: 'ninja', name: 'Ninja Cow', hp: 35, speed: 4.2, bounty: 9, damage: 6, radius: 0.5, scale: 0.9, color: 0x3a3a4a,
+  camo: 7, firstWave: 11, weight: 1,
+});
+
 // Surprise-only cows (weight 0: never in a wave mix; surprises.js spawns them).
 
 defineCow({
@@ -99,6 +139,20 @@ defineCow({
   id: 'calf', name: 'Calf', hp: 6, speed: 4.5, bounty: 1, damage: 1, radius: 0.35, scale: 0.5, color: 0xffffff,
   weight: 0,
 });
+
+defineCow({
+  id: 'trojan', name: 'Trojan Cow', hp: 120, speed: 2.4, bounty: 10, damage: 12, radius: 0.85, scale: 1.6, color: 0x9a7a50,
+  splitInto: 'fast', splitCount: 6, weight: 0,
+});
+
+defineCow({
+  id: 'megamama', name: 'Mega Mama', hp: 220, speed: 2.0, bounty: 20, damage: 20, radius: 0.95, scale: 2.0, color: 0xff9ec0,
+  splitInto: 'mama', splitCount: 3, weight: 0,
+});
+
+for (const t of COW_TYPE_LIST) {
+  if (t.splitInto && !COW_TYPES[t.splitInto]) throw new Error(`cow type ${t.id}: splits into unknown ${t.splitInto}`);
+}
 
 /**
  * Live cows, densely packed in slots 0..count-1. Removing a cow moves the
@@ -120,6 +174,8 @@ export class CowPool {
     this.ox = new Float64Array(capacity);
     this.oz = new Float64Array(capacity);
     this.hp = new Float64Array(capacity);
+    /** HP at spawn (after wave scaling), for heals and enrage. */
+    this.maxHp = new Float64Array(capacity);
     this.type = new Uint8Array(capacity);
     /** Seconds since the cow was last hit, for a damage flash. */
     this.hitAge = new Float64Array(capacity);
@@ -129,7 +185,7 @@ export class CowPool {
     this.slowT = new Float64Array(capacity);
     this.slowF = new Float64Array(capacity);
     this.nextId = 1;
-    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.type, this.hitAge, this.id, this.slowT, this.slowF];
+    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF];
   }
 
   /** Returns the slot, or -1 when full. */
@@ -141,7 +197,7 @@ export class CowPool {
     this.vx[i] = this.vz[i] = 0;
     this.ox[i] = ox;
     this.oz[i] = oz;
-    this.hp[i] = type.hp;
+    this.hp[i] = this.maxHp[i] = type.hp;
     this.type[i] = type.index;
     this.hitAge[i] = Infinity;
     this.id[i] = this.nextId++;

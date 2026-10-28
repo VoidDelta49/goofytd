@@ -6,7 +6,7 @@
 import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
-import { CowPool, COW_TYPES, COW_TYPE_LIST, waveMix, pickFromMix } from './cows.js';
+import { CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, TOWER_TYPES, TOWER_FORMS } from './towers.js';
 import { mulberry32 } from './rng.js';
 import { SURPRISES, surpriseChance, pickSurprise } from './surprises.js';
@@ -125,7 +125,17 @@ export class Game {
     /** Regular wave spawns pause while spawnHold > 0, and their interval is × spawnRate (a surprise can change both). */
     this.spawnHold = 0;
     this.spawnRate = 1;
+    // Cows popping out of a dead Mama draw from their own stream too, so kills never shift wave or surprise draws.
+    this.splitRng = mulberry32((this.cfg.seed ^ 0xca1fca1f) >>> 0);
+    /** Vet Cow heal clock (s until the next pulse). */
+    this.healTimer = HEAL_PULSE;
+    /** Bounties × bountyMult while bountyTime > 0 (Happy Hour). */
+    this.bountyMult = 1;
+    this.bountyTime = 0;
   }
+
+  /** HP multiplier for cows spawned this wave. */
+  get hpScale() { return 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1); }
 
   // ---- waves and spawning -------------------------------------------------
 
@@ -225,7 +235,7 @@ export class Game {
   }
 
   updateSurprises(dt) {
-    const hpScale = 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1);
+    const hpScale = this.hpScale;
     for (let k = this.runs.length - 1; k >= 0; k--) {
       const run = this.runs[k];
       run.t += dt;
@@ -284,7 +294,7 @@ export class Game {
     this.updateSurprises(dt);
     if (this.spawnHold > 0) this.spawnHold -= dt;
     const mix = waveMix(this.wave);
-    const hpScale = 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1);
+    const hpScale = this.hpScale;
     for (const s of this.spawners) {
       if (s.queue <= 0 || this.spawnHold > 0) continue;
       s.timer -= dt;
@@ -303,15 +313,14 @@ export class Game {
   }
 
   /** `rng`: surprises pass their own stream, so their cows don't shift the regular wave's draws. */
-  spawnCow(type, x, z, hp = type.hp, rng = this.rng) {
-    const spread = this.cfg.spawnSpread;
+  spawnCow(type, x, z, hp = type.hp, rng = this.rng, spread = this.cfg.spawnSpread) {
     let sx = x + (rng() - 0.5) * spread, sz = z + (rng() - 0.5) * spread;
     const cell = this.grid.cellAt(sx, sz);
     if (cell < 0 || !this.grid.walkable(cell)) { sx = x; sz = z; }
     // Herd spread inside a cell, narrower for wide cows so they don't clip the towers beside the path.
     const off = Math.min(0.6 * this.grid.cell, Math.max(0, this.grid.cell - 2 * type.radius));
     const i = this.cows.spawn(type, sx, sz, (rng() - 0.5) * off, (rng() - 0.5) * off);
-    if (i >= 0) this.cows.hp[i] = hp;
+    if (i >= 0) this.cows.hp[i] = this.cows.maxHp[i] = hp;
     return i;
   }
 
@@ -322,7 +331,9 @@ export class Game {
     if (this.lost) return;
     this.time += dt;
     this.updateSpawners(dt);
+    if (this.bountyTime > 0 && (this.bountyTime -= dt) <= 0) this.bountyMult = 1;
     this.updateCows(dt);
+    this.updateHeals(dt);
     this.updateTowers(dt);
     this.updateProjectiles(dt);
     this.updateZones(dt);
@@ -356,6 +367,7 @@ export class Game {
       const dx = tx - x, dz = tz - z;
       const len = Math.sqrt(dx * dx + dz * dz);
       let speed = type.speed;
+      if (type.enrageBelow > 0 && cows.hp[i] < type.enrageBelow * cows.maxHp[i]) speed *= type.enrageSpeed;
       if (cows.slowT[i] > 0) {
         speed *= cows.slowF[i];
         cows.slowT[i] -= dt;
@@ -376,6 +388,53 @@ export class Game {
       this.lost = true;
       this.events.push({ kind: 'lost' });
     }
+  }
+
+  /**
+   * Vet Cows: every HEAL_PULSE s each one gives every other cow within its
+   * healRadius healRate × HEAL_PULSE of that cow's max HP back (never above max).
+   * O(vets × cows) per pulse; vets are rare.
+   */
+  updateHeals(dt) {
+    this.healTimer -= dt;
+    if (this.healTimer > 0) return;
+    this.healTimer += HEAL_PULSE;
+    const { cows } = this;
+    for (let v = 0; v < cows.count; v++) {
+      const vt = COW_TYPE_LIST[cows.type[v]];
+      if (!(vt.healRate > 0)) continue;
+      const vx = cows.x[v], vz = cows.z[v], frac = vt.healRate * HEAL_PULSE;
+      let healed = 0;
+      for (let i = 0; i < cows.count; i++) {
+        if (i === v || cows.hp[i] >= cows.maxHp[i]) continue;
+        const r = vt.healRadius + COW_TYPE_LIST[cows.type[i]].radius;
+        const dx = cows.x[i] - vx, dz = cows.z[i] - vz;
+        if (dx * dx + dz * dz > r * r) continue;
+        cows.hp[i] = Math.min(cows.maxHp[i], cows.hp[i] + frac * cows.maxHp[i]);
+        healed++;
+      }
+      if (healed) this.events.push({ kind: 'heal', x: vx, z: vz, radius: vt.healRadius, healed });
+    }
+  }
+
+  /** Bounties are worth `mult` × for `time` s (a stronger running boost isn't cut short). */
+  boostBounty(mult, time) {
+    if (this.bountyTime > 0 && this.bountyMult > mult) return;
+    this.bountyMult = mult;
+    this.bountyTime = Math.max(this.bountyTime, time);
+  }
+
+  /** Knock every walking cow over for `time` s (cow tipping): speed 0, overriding any slow. */
+  tipCows(time) {
+    const { cows } = this;
+    let n = 0;
+    for (let i = 0; i < cows.count; i++) {
+      if (COW_TYPE_LIST[cows.type[i]].altitude > 0) continue;
+      cows.slowF[i] = 0;
+      cows.slowT[i] = Math.max(cows.slowT[i], time);
+      n++;
+    }
+    return n;
   }
 
   /**
@@ -526,16 +585,30 @@ export class Game {
    */
   damageCow(i, damage, tower, flash = true) {
     const { cows } = this;
+    const type = COW_TYPE_LIST[cows.type[i]];
+    // Armor blunts direct hits (flash) only, never below a quarter of the hit; slicks seep through.
+    if (flash && type.armor > 0) damage = Math.max(0.25 * damage, damage - type.armor);
     cows.hp[i] -= damage;
     if (flash) cows.hitAge[i] = 0;
     if (cows.hp[i] > 0) return false;
-    const type = COW_TYPE_LIST[cows.type[i]];
-    this.money += type.bounty;
+    this.money += type.bounty * this.bountyMult;
     this.kills++;
     if (tower) tower.kills++;
-    this.events.push({ kind: 'kill', x: cows.x[i], z: cows.z[i], id: cows.id[i] });
+    const x = cows.x[i], z = cows.z[i];
+    this.events.push({ kind: 'kill', x, z, id: cows.id[i] });
     cows.remove(i);
+    // Remove first, then append: the new cows land in slots above every slot a caller still holds.
+    if (type.splitInto) this.splitCow(type, x, z);
     return true;
+  }
+
+  /** A dead cow of `type` bursts into splitCount × splitInto at (x, z). */
+  splitCow(type, x, z) {
+    const child = COW_TYPES[type.splitInto];
+    const hp = child.hp * this.hpScale;
+    let n = 0;
+    for (let k = 0; k < type.splitCount; k++) if (this.spawnCow(child, x, z, hp, this.splitRng, 1.5) >= 0) n++;
+    if (n) this.events.push({ kind: 'split', x, z, count: n, type: child.id });
   }
 
   /** Metres of path left from cow i to the milk (Infinity if a walker is lost off the grid; flyers go straight). */

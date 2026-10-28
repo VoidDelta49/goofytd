@@ -28,11 +28,12 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
   assert(waveMix(1).length === 1 && waveMix(2).length === 1 && waveMix(1)[0].type === COW_TYPES.cow, 'early waves not plain');
   // Weight-0 types (Cash Cow, Big Bessie, Calf) are surprise-only and never in a mix.
   const waveTypes = COW_TYPE_LIST.filter((t) => t.weight > 0).length;
-  assert(waveTypes === 5 && waveMix(6).length === waveTypes, 'wave 6 should have every wave type');
+  assert(waveTypes === 10 && waveMix(11).length === waveTypes, 'wave 11 should have every wave type');
+  assert(waveMix(6).length === 5 && waveMix(10).length === 9, 'one new type per wave from 7 to 11');
   assert(cowDebuts(1).length === 0, 'wave 1 announces the plain cow');
-  const debuted = [3, 4, 5, 6].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
-  assert(debuted === 'big,boomer,fast,flying', `debuts: ${debuted}`);
-  const mix = waveMix(6);
+  const debuted = [3, 4, 5, 6, 7, 8, 9, 10, 11].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
+  assert(debuted === 'big,boomer,bull,fast,flying,mama,ninja,tin,vet', `debuts: ${debuted}`);
+  const mix = waveMix(11);
   const counts = new Map();
   for (let k = 0; k < 1000; k++) {
     const t = pickFromMix(mix, k / 1000);
@@ -45,19 +46,20 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
   }
 });
 
-test('cows: spawners use the mix (wave 1 plain, wave 7 everything) with per-wave HP', () => {
+test('cows: spawners use the mix (wave 1 plain, wave 11 everything) with per-wave HP', () => {
   // Surprises off: this checks the wave formula alone (surprises.test.js covers them).
   const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9, surprises: false });
   const seen = [];
   const spawn = g.spawnCow.bind(g);
   g.spawnCow = (type, x, z, hp) => { seen.push({ wave: g.wave, id: type.id, hp }); return spawn(type, x, z, hp); };
-  for (let w = 1; w <= 7; w++) { g.startWave(); run(g, 6); }
+  // Spawner cows only: calves popping out of Mamas are split spawns, not the mix.
+  for (let w = 1; w <= 11; w++) { g.startWave(); run(g, 6); }
   const w1 = seen.filter((s) => s.wave === 1);
   assert(w1.length === 40 && w1.every((s) => s.id === 'cow' && s.hp === COW_TYPES.cow.hp), 'wave 1 not 40 plain cows');
-  const w7 = new Set(seen.filter((s) => s.wave === 7).map((s) => s.id));
-  assert(w7.size === COW_TYPE_LIST.filter((t) => t.weight > 0).length, `wave 7 types: ${[...w7]}`);
-  const big7 = seen.find((s) => s.wave === 7 && s.id === 'big');
-  assert(Math.abs(big7.hp - COW_TYPES.big.hp * (1 + 0.15 * 6)) < 1e-9, `big cow hp ${big7.hp}`);
+  const w11 = new Set(seen.filter((s) => s.wave === 11).map((s) => s.id));
+  assert(w11.size === COW_TYPE_LIST.filter((t) => t.weight > 0).length, `wave 11 types: ${[...w11]}`);
+  const big11 = seen.find((s) => s.wave === 11 && s.id === 'big');
+  assert(Math.abs(big11.hp - COW_TYPES.big.hp * (1 + 0.15 * 10)) < 1e-9, `big cow hp ${big11.hp}`);
 });
 
 test('cows: Zoomies beat a plain cow to the milk, Big Cows are slow, tanky and stay off the towers', () => {

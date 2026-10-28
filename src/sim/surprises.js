@@ -134,3 +134,78 @@ defineSurprise({
     { at: 0, say: `A farmer dropped their wallet. +${30 + 8 * wave} moolah!`, call: (game) => { game.money += 30 + 8 * wave; } },
   ],
 });
+
+defineSurprise({
+  id: 'happyhour', name: 'Happy Hour', firstWave: 3, weight: 2,
+  script: () => [
+    { at: 0, say: 'HAPPY HOUR! Every cow is worth double for 15 seconds!', call: (game) => game.boostBounty(2, 15) },
+    { at: 15, say: 'Happy Hour is over. Back to regular-priced cows.' },
+  ],
+});
+
+defineSurprise({
+  id: 'tipping', name: 'Cow Tipping', firstWave: 5, weight: 2, delay: [6, 14],
+  script: () => [
+    { at: 0, say: 'Some teenagers snuck in and TIPPED THE COWS. Free shots!', call: (game) => game.tipCows(3) },
+  ],
+});
+
+defineSurprise({
+  id: 'milkman', name: 'The Milkman', firstWave: 6, weight: 1,
+  script: ({ wave }) => {
+    const milk = 15, cash = 20 + 5 * wave;
+    return [{
+      at: 0, call: (game) => {
+        const room = game.cfg.milk - game.milk;
+        if (room > 0) {
+          game.milk += Math.min(milk, room);
+          game.announce('milkman', `The milkman dropped by: +${Math.min(milk, room)} milk!`);
+        } else {
+          game.money += cash;
+          game.announce('milkman', `The milkman found your tank full and tipped you ${cash} moolah.`);
+        }
+      },
+    }];
+  },
+});
+
+defineSurprise({
+  id: 'trojan', name: 'Trojan Cow', firstWave: 6, weight: 2,
+  script: () => [
+    { at: 0, say: 'A suspiciously large wooden cow is rolling in. Probably fine.' },
+    { at: 0.6, spawn: 'trojan', count: 1, from: 'random', onKill: (game) => game.announce('trojan', 'IT WAS FULL OF ZOOMIES!') },
+  ],
+});
+
+defineSurprise({
+  id: 'matryoshka', name: 'Mega Mama', firstWave: 8, weight: 2, delay: [3, 12],
+  script: () => [
+    { at: 0, say: "MEGA MAMA is here. She's... very expecting." },
+    { at: 1, spawn: 'megamama', count: 1, from: 'random', onKill: (game) => game.announce('matryoshka', "Mama's mamas have calves. It's cows all the way down.") },
+  ],
+});
+
+defineSurprise({
+  id: 'rodeo', name: 'Rodeo', firstWave: 9, weight: 2,
+  script: ({ wave }) => [
+    { at: 0, say: "YEEHAW! It's a RODEO. Don't make the bulls angry. (You will.)" },
+    { at: 0.8, spawn: 'bull', count: 3 + Math.floor(wave / 3), every: 0.4, from: 'all' },
+  ],
+});
+
+defineSurprise({
+  id: 'hospital', name: 'Field Hospital', firstWave: 10, weight: 2, delay: [3, 10],
+  script: ({ wave }) => [
+    { at: 0, say: 'A Big Cow tank column with VET COW support. Shoot the medics first!' },
+    { at: 1, spawn: 'big', count: 2 + Math.floor(wave / 5), every: 0.8, from: 'random' },
+    { at: 1.4, spawn: 'vet', count: 2, every: 0.8, from: 'same' },
+  ],
+});
+
+defineSurprise({
+  id: 'ninjas', name: 'Ninja Night', firstWave: 11, weight: 2,
+  // Ninjas don't announce themselves until they're already in.
+  script: ({ wave }) => [
+    { at: 0, spawn: 'ninja', count: 3 + Math.floor(wave / 2), every: 0.3, from: 'flank', announce: '...wait, were those NINJA COWS?' },
+  ],
+});

@@ -14,7 +14,8 @@ import { COW_TYPE_LIST } from './cows.js';
 
 /**
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
- * [minRange, range] of the tower centre (in XZ) count.
+ * [minRange, range] of the tower centre (in XZ) count, and a camo cow only
+ * within its `camo` metres.
  */
 export const TARGETING = {
   /** Furthest along the path: the cow with the shortest walk left to the milk. */
@@ -40,9 +41,11 @@ function pick(game, t, score) {
   const r2 = def.range * def.range, m2 = def.minRange * def.minRange;
   let best = -1, bestScore = -Infinity;
   for (let i = 0; i < cows.count; i++) {
-    if (!def.hitsAir && COW_TYPE_LIST[cows.type[i]].altitude > 0) continue;
+    const type = COW_TYPE_LIST[cows.type[i]];
+    if (!def.hitsAir && type.altitude > 0) continue;
     const d2 = dist2(cows, i, t.x, t.z);
     if (d2 > r2 || d2 < m2) continue;
+    if (type.camo > 0 && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close
     const s = score(i);
     if (s > bestScore) { bestScore = s; best = i; }
   }

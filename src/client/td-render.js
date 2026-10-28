@@ -45,6 +45,8 @@ export class TdRenderer {
     this.flash = new THREE.Color(1, 0, 0);
     this.fuse = new THREE.Color(1, 0.95, 0.3);
     this.goo = new THREE.Color(0.85, 0.62, 0.25);
+    this.rage = new THREE.Color(1, 0.15, 0.1);
+    this.healGlow = new THREE.Color(0.3, 1, 0.45);
 
     this.towerViews = new Map();
     this.ghosts = new Map();
@@ -159,6 +161,10 @@ export class TdRenderer {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ ...e, age: 0 });
       } else if (e.kind === 'splash') {
         this.puff(e.x, e.y ?? 0.3, e.z, e.radius, e.color);
+      } else if (e.kind === 'split') {
+        this.puff(e.x, 0.9, e.z, 1.6, 0xffa8d0);
+      } else if (e.kind === 'heal') {
+        this.puff(e.x, 0.4, e.z, e.radius * 0.6, 0x7dffa0);
       } else if (e.kind === 'kill') {
         this.puff(e.x, 0.8, e.z, 0.9, 0xffffff);
       } else if (e.kind === 'drink') {
@@ -221,11 +227,17 @@ export class TdRenderer {
         // Flyers bob slowly up and down instead of waddling.
         o.position.set(x, type.altitude + Math.sin(ph * 0.4) * 0.3, z);
         o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), 0);
+      } else if (c.slowT[i] > 0 && c.slowF[i] === 0) {
+        // Tipped over: lying on its side, legs in the air, until it gets up.
+        o.position.set(x, 0.45 * type.scale, z);
+        o.rotation.set(0, (c.id[i] * 2.39) % (2 * Math.PI), Math.PI / 2);
       } else {
-        // Waddle: bob and roll a little, out of phase per cow.
-        o.position.set(x, Math.abs(Math.sin(ph)) * 0.08, z);
+        // Waddle: bob and roll a little, out of phase per cow. Enraged bulls shake.
+        const mad = type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i];
+        const rock = mad ? 0.18 : 0.05;
+        o.position.set(x, Math.abs(Math.sin(mad ? ph * 2 : ph)) * (mad ? 0.16 : 0.08), z);
         // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
-        o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), Math.sin(ph) * 0.05);
+        o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), Math.sin(mad ? ph * 2.5 : ph) * rock);
       }
       o.scale.setScalar(type.scale);
       o.updateMatrix();
@@ -241,6 +253,9 @@ export class TdRenderer {
       // Type tint; Kaboom Cows flicker like a lit fuse; everything flashes red when hit.
       col.setHex(type.color);
       if (type.blastRadius > 0) col.lerp(this.fuse, 0.5 + 0.5 * Math.sin(this.time * 14 + c.id[i]));
+      if (type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i]) col.lerp(this.rage, 0.6);
+      if (type.healRate > 0) col.lerp(this.healGlow, 0.25 + 0.25 * Math.sin(this.time * 6 + c.id[i]));
+      if (type.camo > 0) col.multiplyScalar(0.55 + 0.25 * Math.sin(this.time * 3 + c.id[i])); // shimmer in and out
       if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       m.setColorAt(i, col);
