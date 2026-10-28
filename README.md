@@ -58,6 +58,7 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | C or Left Shift | Crouch (not Ctrl: Ctrl+W closes the browser tab) |
 | R | Respawn |
 | H | Toggle auto-hop (hold jump to keep hopping) |
+| F | Toggle fullscreen. Once the Firefox echo filter has fired (that browser lets the cursor roam out of the window), clicking into the game goes fullscreen automatically; `?fs=1` forces that, `?fs=0` turns it off |
 | [ and ] | Mouse sensitivity (saved in the browser) |
 | \\ | Reset sensitivity to defaults |
 | Esc | Release the mouse |

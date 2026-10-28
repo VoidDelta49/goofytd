@@ -189,3 +189,19 @@ test('look: echo filter turns itself off when the warp starts working again', ()
   feed(m, Array.from({ length: 12 }, () => [5, 3]), 1000, 8);
   assert(!m.stats.echo, 'still filtering a clean stream');
 });
+
+import { loadFullscreenLock } from '../src/client/input.js';
+
+function fakeStorage(init = {}) {
+  const m = new Map(Object.entries(init));
+  return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), has: (k) => m.has(k) };
+}
+
+test('fullscreen lock: remembered flag, ?fs=1 forces, ?fs=0 turns off and forgets', () => {
+  assert(!loadFullscreenLock(null, fakeStorage()), 'on by default');
+  assert(loadFullscreenLock(null, fakeStorage({ 'goofytd.fullscreenLock': '1' })), 'stored flag ignored');
+  assert(loadFullscreenLock('1', fakeStorage()), '?fs=1 ignored');
+  const st = fakeStorage({ 'goofytd.fullscreenLock': '1' });
+  assert(!loadFullscreenLock('0', st) && !st.has('goofytd.fullscreenLock'), '?fs=0 did not clear');
+  assert(!loadFullscreenLock(null, { getItem() { throw new Error('blocked'); } }), 'blocked storage threw');
+});

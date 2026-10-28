@@ -25,6 +25,7 @@ export const BINDINGS = {
   crouch: ['KeyC', 'ShiftLeft'],
   respawn: ['KeyR'],
   autoHop: ['KeyH'],
+  fullscreen: ['KeyF'],
   sensDown: ['BracketLeft'],
   sensUp: ['BracketRight'],
   sensReset: ['Backslash'],
@@ -52,6 +53,19 @@ export function loadSettings(storage = globalThis.localStorage) {
     sensitivity: num(stored.sensitivity, SENS_RANGE, DEFAULT_SETTINGS.sensitivity),
     touchSensitivity: num(stored.touchSensitivity, TOUCH_SENS_RANGE, DEFAULT_SETTINGS.touchSensitivity),
   };
+}
+
+/**
+ * Whether clicking into the game should also go fullscreen. Set on its own
+ * key (not in settings) once the Firefox echo filter has fired: that browser
+ * can't hold the cursor inside a window, but fullscreen confines it.
+ * `?fs=1` forces it on, `?fs=0` turns it off and forgets it.
+ */
+const FS_KEY = 'goofytd.fullscreenLock';
+export function loadFullscreenLock(fs, storage = globalThis.localStorage) {
+  if (fs === '0') { try { storage?.removeItem(FS_KEY); } catch { /* blocked */ } return false; }
+  if (fs === '1') return true;
+  try { return storage?.getItem(FS_KEY) === '1'; } catch { return false; }
 }
 
 function saveSettings(settings) {
@@ -83,6 +97,10 @@ export class Input {
     /** Raw (unaccelerated) lock is opt-in with ?raw=1; it misreports on some Linux setups. */
     this.rawMouse = params.get('raw') === '1';
     this.debug = params.has('debug');
+    /** Go fullscreen together with mouse capture (cursor can't leave the window then). */
+    this.fullscreenLock = loadFullscreenLock(params.get('fs'));
+    this.echoHandled = false;
+    this.noticeUntil = 0;
     this.lockMode = 'none';
     this.lockPending = false;
     this.refusals = 0;
@@ -141,6 +159,8 @@ export class Input {
       return;
     }
     this.lockPending = true;
+    // Same click as the lock request, because fullscreen needs a user gesture.
+    if (this.fullscreenLock) this.enterFullscreen();
     try {
       if (this.rawMouse) {
         this.lockMode = 'raw';
@@ -158,6 +178,30 @@ export class Input {
     } finally {
       this.lockPending = false;
     }
+  }
+
+  enterFullscreen() {
+    const root = document.documentElement;
+    if (!document.fullscreenEnabled || document.fullscreenElement) return;
+    root.requestFullscreen({ navigationUI: 'hide' }).catch(() => { /* refused: carry on windowed */ });
+  }
+
+  toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    else this.enterFullscreen();
+  }
+
+  /**
+   * The look filter just saw Firefox's cursor-echo stream, so this browser is
+   * not holding the cursor in place. Remember to use fullscreen from now on,
+   * and say so once.
+   */
+  onEchoDetected() {
+    this.fullscreenLock = true;
+    try { localStorage.setItem(FS_KEY, '1'); } catch { /* private mode */ }
+    if (document.fullscreenElement || !document.fullscreenEnabled) return;
+    this.notice = 'Your browser lets the cursor roam outside the window. Press F for fullscreen (from now on clicking will do it for you). ?fs=0 turns that off.';
+    this.noticeUntil = performance.now() + 10000;
   }
 
   /** The browser refused pointer lock. */
@@ -219,6 +263,7 @@ export class Input {
       this.down.add(e.code);
       if (is('jump')) this.player.pending.jumpPressed = true;
       if (is('respawn')) this.player.pending.respawn = true;
+      if (is('fullscreen')) this.toggleFullscreen();
       if (is('autoHop')) {
         this.cfg.autoHop = !this.cfg.autoHop;
         this.touch.syncButtons();
@@ -239,6 +284,14 @@ export class Input {
 
   /** Apply this frame's look, then copy keys + touch into the player's pending input. Call once per frame. */
   sample() {
+    if (this.look.stats.echo && !this.echoHandled) {
+      this.echoHandled = true;
+      this.onEchoDetected();
+    }
+    if (this.noticeUntil && performance.now() > this.noticeUntil) {
+      this.noticeUntil = 0;
+      this.notice = '';
+    }
     const [dYaw, dPitch] = this.look.consume(this.settings.sensitivity);
     if (dYaw !== 0 || dPitch !== 0) this.player.look(dYaw, dPitch);
 
