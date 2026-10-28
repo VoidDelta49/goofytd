@@ -114,7 +114,7 @@ export class TouchControls {
     } else {
       // Client-coordinate deltas, not movementX: touch movementX is 0 in Safari.
       const radPerPx = (this.input.settings.touchSensitivity * Math.PI) / 180;
-      this.input.player.look(-(e.clientX - t.x) * radPerPx, -(e.clientY - t.y) * radPerPx);
+      this.input.look.addRadians(-(e.clientX - t.x) * radPerPx, -(e.clientY - t.y) * radPerPx);
     }
     t.x = e.clientX;
     t.y = e.clientY;

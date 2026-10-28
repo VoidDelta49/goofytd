@@ -31,11 +31,12 @@ export class Hud {
     this.lastText = now;
 
     if (this.debugEl) {
-      const st = input.stats;
+      const st = input.look.stats;
       this.debugEl.textContent =
-        `mouse debug (?debug)\nlock ${input.locked} · mode ${st.mode} · dpr ${devicePixelRatio}\n` +
-        `last dx,dy ${st.last.join(', ')}\nevents ${st.events} (${st.perSec}/s) · discarded ${st.discarded}\n` +
-        `max |delta| ${st.maxAbs}\nyaw ${player.yaw.toFixed(3)} pitch ${player.pitch.toFixed(3)}\n${navigator.userAgent.slice(0, 90)}`;
+        `mouse debug (?debug)\nlock ${input.locked} · mode ${input.lockMode} · dpr ${devicePixelRatio}\n` +
+        `last dx,dy ${st.last.join(', ')} · max |delta| ${st.maxAbs}\n` +
+        `accepted ${st.accepted} · rejected ${st.rejected} · sens ${input.settings.sensitivity}\n` +
+        `yaw ${(player.yaw * 180 / Math.PI).toFixed(1)}° pitch ${(player.pitch * 180 / Math.PI).toFixed(1)}°\n${navigator.userAgent.slice(0, 90)}`;
     }
     const s = player.state;
     const speed = horizontalSpeed(s);

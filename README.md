@@ -28,7 +28,7 @@ An incredibly goofy but fun first-person tower defense game: defend your milk fr
 | Tick rate | Fixed 64 Hz simulation, camera interpolated between ticks | Frame-rate independent movement; matches Source/CS tick rates. |
 | Default map | Open 200 m field, milk at the centre, 3 m boundary wall; movement playground at `?map=playground` | Empty space to build and test towers; the playground stays for tuning movement. |
 | Mouse look | Pointer lock, with drag-to-look when the browser refuses the lock | A refused lock (sandboxed embed, Chrome's re-lock cooldown after Esc) used to leave the mouse unable to look, silently. |
-| Mouse capture mode | Standard pointer lock by default; raw/unadjusted is opt-in with `?raw=1`; mouse deltas over 300 counts and the first event after a lock change are discarded | Erratic camera spin reported on one machine; raw input is the riskiest path on Linux. Add `?debug` to show live mouse stats. Root cause not yet confirmed. |
+| Camera / mouse look | `src/client/look.js`: mouse deltas are filtered (first 2 events after a lock change, >250 counts per event, NaN) and accumulated, applied once per frame; camera orientation is a quaternion built straight from yaw/pitch (no Euler order, no roll). Standard pointer lock by default, raw input opt-in with `?raw=1`; `?debug` shows live mouse stats | Rewrite after reports of the view spinning erratically; the whole path is unit-tested and checked against the real three.js camera. |
 | Touch | Floating left-thumb stick, drag-to-look, jump button that also steers, crouch toggle | Playable on phones; the jump thumb steering is what makes air strafing possible with two thumbs. |
 
 Still open: collision approach for thousands of cows (likely a uniform grid), WebGPU renderer, multiplayer networking model. JS floating-point maths (`Math.sin` etc.) is not guaranteed bit-identical across browsers, which matters for lockstep PvP; decide when PvP is scoped.
@@ -57,6 +57,7 @@ Deploying: in the repo's **Settings → Pages**, set the source to *Deploy from 
 | R | Respawn |
 | H | Toggle auto-hop (hold jump to keep hopping) |
 | [ and ] | Mouse sensitivity (saved in the browser) |
+| \\ | Reset sensitivity to defaults |
 | Esc | Release the mouse |
 
 If the browser refuses mouse capture (for example inside a sandboxed embed), a notice appears and you look by holding the left button and dragging instead.
@@ -84,7 +85,7 @@ node tests/run.js        # or: npm test
 
 Or open `/tests/` on the local server or on the deployed Pages site.
 
-They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, and the touch stick mapping.
+They cover collision sweeps (including tunnelling), acceleration, friction, wall sliding, jump arc vs. ballistics, jump buffering, coyote time, step-up/step-down, crouching under ceilings, crouch-jump height, strafe-jump speed gain, determinism, the fixed-tick loop at different frame rates, every level spawn, the open-field walls holding a 40 m/s player, the touch stick mapping, and the look path (delta filtering, exact turn rates, camera orientation vs movement axes, settings validation).
 
 ## Movement model
 
@@ -112,7 +113,8 @@ src/sim/                pure simulation, no three.js / DOM
   movement.js           pmove-style movement tick
 src/client/             browser-only
   render.js             three.js scene, world-UV box meshes, grid texture, lights
-  input.js              pointer lock + drag-look fallback, keyboard, bindings, sensitivity
+  look.js               mouse-delta filter/accumulator, view quaternion (pure, tested)
+  input.js              pointer lock + drag-look fallback, keyboard, bindings, settings
   touch.js              touch stick, drag-look and buttons
   hud.js                speed/state/FPS overlay
 tests/                  harness.js, *.test.js, run.js (Node), index.html (browser)

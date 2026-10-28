@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { Surface } from '../level.js';
+import { viewQuaternion } from './look.js';
 
 const SKY = 0x9ec7f2;
 
@@ -32,7 +33,6 @@ export class Renderer {
 
     // Vertical FOV 70° is ~102° horizontal at 16:9.
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
-    this.camera.rotation.order = 'YXZ';
 
     this.scene.add(new THREE.HemisphereLight(0xdfefff, 0x6b5f4f, 1.2));
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
@@ -77,7 +77,9 @@ export class Renderer {
   /** @param {{x:number,y:number,z:number}} eye @param {number} yaw @param {number} pitch */
   render(eye, yaw, pitch) {
     this.camera.position.set(eye.x, eye.y, eye.z);
-    this.camera.rotation.set(pitch, yaw, 0);
+    // Orientation straight from the view angles as a quaternion: no Euler
+    // order to get wrong and no roll.
+    this.camera.quaternion.set(...viewQuaternion(yaw, pitch));
 
     // Keep the shadow frustum centred on the player, snapped to a texel-sized
     // world grid to reduce shadow-edge crawl while moving. (Not exact: the

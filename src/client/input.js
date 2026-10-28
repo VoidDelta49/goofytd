@@ -1,13 +1,14 @@
-// Keyboard, mouse and touch input. Writes view angles and the player's pending
-// input; never touches simulation state directly.
+// Keyboard, mouse and touch input. Gathers raw input only: mouse and touch
+// look deltas go into a MouseLook accumulator and are applied to the view
+// once per frame in sample(); keys and the touch stick become the player's
+// pending input. Never touches simulation state directly.
 //
-// Mouse look has two paths:
+// Mouse look has two capture modes:
 //  1. Pointer lock (normal): every mouse count turns the view.
-//  2. Drag-to-look fallback, used when the browser refuses pointer lock
-//     (sandboxed embeds without allow-pointer-lock, Chrome's ~1 s re-lock
-//     cooldown after Esc, browsers without the API). Without it a refused
-//     lock left the mouse unable to look at all, with no message.
+//  2. Drag-to-look, used when the browser refuses pointer lock (sandboxed
+//     embeds, Chrome's ~1 s re-lock cooldown after Esc, no API).
 
+import { MouseLook } from './look.js';
 import { TouchControls } from './touch.js';
 
 /** Keys by `KeyboardEvent.code`, so bindings follow physical position on any layout. */
@@ -24,42 +25,35 @@ export const BINDINGS = {
   autoHop: ['KeyH'],
   sensDown: ['BracketLeft'],
   sensUp: ['BracketRight'],
+  sensReset: ['Backslash'],
 };
 
 const SETTINGS_KEY = 'goofytd.settings';
 
 /**
  * sensitivity: degrees of turn per mouse count = sensitivity × 0.022, the
- * Quake/Source m_yaw unit FPS players already know.
+ * Quake/Source unit FPS players already know.
  * touchSensitivity: degrees of turn per CSS pixel of finger drag.
  */
-export function loadSettings() {
-  const defaults = { sensitivity: 2.0, touchSensitivity: 0.3 };
-  try {
-    return { ...defaults, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') };
-  } catch {
-    return defaults;
-  }
+export const DEFAULT_SETTINGS = Object.freeze({ sensitivity: 1.5, touchSensitivity: 0.3 });
+const SENS_RANGE = [0.1, 10];
+const TOUCH_SENS_RANGE = [0.05, 2];
+
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+/** Stored settings, with anything missing, non-numeric or out of range replaced by the default. */
+export function loadSettings(storage = globalThis.localStorage) {
+  let stored = {};
+  try { stored = JSON.parse(storage?.getItem(SETTINGS_KEY) || '{}') || {}; } catch { /* corrupt or blocked */ }
+  const num = (v, [lo, hi], d) => (typeof v === 'number' && v >= lo && v <= hi ? v : d);
+  return {
+    sensitivity: num(stored.sensitivity, SENS_RANGE, DEFAULT_SETTINGS.sensitivity),
+    touchSensitivity: num(stored.touchSensitivity, TOUCH_SENS_RANGE, DEFAULT_SETTINGS.touchSensitivity),
+  };
 }
 
 function saveSettings(settings) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* private mode */ }
-}
-
-const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
-
-/**
- * One mousemove event never legitimately moves more than this many counts
- * (a fast flick on a 16000 DPI mouse is ~100). Larger values are the pointer
- * warping to the lock centre or a driver spike, not the hand.
- */
-export const MAX_MOUSE_DELTA = 300;
-
-/** Returns [dx, dy] if the event is a real movement, or null to discard it. */
-export function sanitizeMouseDelta(dx, dy) {
-  if (!Number.isFinite(dx) || !Number.isFinite(dy)) return null;
-  if (Math.abs(dx) > MAX_MOUSE_DELTA || Math.abs(dy) > MAX_MOUSE_DELTA) return null;
-  return [dx, dy];
 }
 
 export class Input {
@@ -74,6 +68,7 @@ export class Input {
     this.player = player;
     this.cfg = cfg;
     this.settings = loadSettings();
+    this.look = new MouseLook();
     this.down = new Set();
     this.locked = false;
     /** Drag-to-look mode after pointer lock was refused. */
@@ -83,17 +78,15 @@ export class Input {
     this.notice = '';
     this.lastPointerType = 'mouse';
     const params = new URLSearchParams(location.search);
-    /** Raw (unaccelerated) lock is opt-in with ?raw=1: it is the riskiest path on Linux. */
+    /** Raw (unaccelerated) lock is opt-in with ?raw=1; it misreports on some Linux setups. */
     this.rawMouse = params.get('raw') === '1';
     this.debug = params.has('debug');
-    /** Diagnostics for ?debug: what the browser actually reports. */
-    this.stats = { events: 0, discarded: 0, last: [0, 0], maxAbs: 0, perSec: 0, _count: 0, _t: performance.now(), mode: 'none' };
+    this.lockMode = 'none';
     this.touch = new TouchControls(target, touchRoot, this);
 
     if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch-device');
 
     target.addEventListener('pointerdown', (e) => this.onPointerDown(e));
-    target.addEventListener('pointermove', (e) => this.onPointerMove(e));
     target.addEventListener('pointerup', () => { this.dragging = false; });
     target.addEventListener('pointercancel', () => { this.dragging = false; });
     target.addEventListener('click', () => {
@@ -102,7 +95,8 @@ export class Input {
     });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === target;
-      this.skipNextMove = true; // first event after a lock change can be the warp to centre
+      this.look.reset();
+      this.dragging = false;
       if (this.locked) {
         this.freeLook = false;
         this.notice = '';
@@ -112,6 +106,8 @@ export class Input {
     });
     // Firefox and Safari report refusals only through this event.
     document.addEventListener('pointerlockerror', () => this.lockFailed());
+    // One listener for both modes. mousemove (not pointermove) because it is
+    // the event pointer lock is specified on, and it never duplicates.
     document.addEventListener('mousemove', (e) => this.onMouseMove(e));
     document.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     window.addEventListener('keydown', (e) => this.onKey(e, true));
@@ -120,6 +116,7 @@ export class Input {
       this.down.clear();
       this.dragging = false;
       this.freeLook = false;
+      this.look.reset();
       this.touch.release();
     });
   }
@@ -137,15 +134,15 @@ export class Input {
     }
     try {
       if (this.rawMouse) {
-        this.stats.mode = 'raw';
+        this.lockMode = 'raw';
         await this.target.requestPointerLock({ unadjustedMovement: true });
       } else {
-        this.stats.mode = 'standard';
+        this.lockMode = 'standard';
         await this.target.requestPointerLock();
       }
     } catch (e) {
       if (this.rawMouse && e?.name === 'NotSupportedError') {
-        this.stats.mode = 'standard (raw unsupported)';
+        this.lockMode = 'standard (raw unsupported)';
         try { await this.target.requestPointerLock(); } catch { this.lockFailed(); }
       } else {
         this.lockFailed();
@@ -159,37 +156,16 @@ export class Input {
     this.notice = `${reason} Hold the left button and drag to look · click to retry · Esc to stop`;
   }
 
-  /** Locked mouse: every count turns the view. */
-  onMouseMove(e) {
-    if (this.locked) this.turnByMouse(e.movementX, e.movementY);
-  }
-
   onPointerDown(e) {
     this.lastPointerType = e.pointerType;
     if (e.pointerType !== 'mouse' || this.locked || !this.freeLook || e.button !== 0) return;
     this.dragging = true;
-    this.target.setPointerCapture(e.pointerId);
+    this.look.reset();
+    this.look.settle = 0; // no cursor warp without a lock
   }
 
-  /** Unlocked fallback: turn only while the left button is held. */
-  onPointerMove(e) {
-    if (this.dragging && !this.locked && e.pointerType === 'mouse') this.turnByMouse(e.movementX, e.movementY);
-  }
-
-  turnByMouse(dx, dy) {
-    const st = this.stats;
-    st.events++; st._count++;
-    const now = performance.now();
-    if (now - st._t >= 1000) { st.perSec = Math.round((st._count * 1000) / (now - st._t)); st._count = 0; st._t = now; }
-    st.last = [dx, dy];
-    st.maxAbs = Math.max(st.maxAbs, Math.abs(dx) || 0, Math.abs(dy) || 0);
-    if (this.skipNextMove) { this.skipNextMove = false; st.discarded++; return; }
-    const d = sanitizeMouseDelta(dx, dy);
-    if (!d) { st.discarded++; return; }
-    [dx, dy] = d;
-    const radPerCount = (this.settings.sensitivity * 0.022 * Math.PI) / 180;
-    // Mouse right turns right (negative yaw); mouse down looks down.
-    this.player.look(-dx * radPerCount, -dy * radPerCount);
+  onMouseMove(e) {
+    if (this.locked || this.dragging) this.look.addMouse(e.movementX, e.movementY);
   }
 
   onWheel(e) {
@@ -200,7 +176,7 @@ export class Input {
   }
 
   adjustTouchSensitivity(delta) {
-    this.settings.touchSensitivity = Math.round(clamp(this.settings.touchSensitivity + delta, 0.05, 2) * 100) / 100;
+    this.settings.touchSensitivity = Math.round(clamp(this.settings.touchSensitivity + delta, ...TOUCH_SENS_RANGE) * 100) / 100;
     saveSettings(this.settings);
   }
 
@@ -208,6 +184,7 @@ export class Input {
     const is = (action) => BINDINGS[action].includes(e.code);
     if (isDown && e.code === 'Escape' && this.freeLook) {
       this.freeLook = false;
+      this.dragging = false;
       this.notice = '';
       this.down.clear();
       return;
@@ -228,7 +205,11 @@ export class Input {
       }
       if (is('sensDown') || is('sensUp')) {
         const s = this.settings.sensitivity + (is('sensUp') ? 0.1 : -0.1);
-        this.settings.sensitivity = Math.round(clamp(s, 0.1, 10) * 10) / 10;
+        this.settings.sensitivity = Math.round(clamp(s, ...SENS_RANGE) * 10) / 10;
+        saveSettings(this.settings);
+      }
+      if (is('sensReset')) {
+        Object.assign(this.settings, DEFAULT_SETTINGS);
         saveSettings(this.settings);
       }
     } else {
@@ -236,8 +217,11 @@ export class Input {
     }
   }
 
-  /** Merge keys and touch into the player's pending input. Call once per frame. */
+  /** Apply this frame's look, then copy keys + touch into the player's pending input. Call once per frame. */
   sample() {
+    const [dYaw, dPitch] = this.look.consume(this.settings.sensitivity);
+    if (dYaw !== 0 || dPitch !== 0) this.player.look(dYaw, dPitch);
+
     const held = (action) => BINDINGS[action].some((c) => this.down.has(c));
     const t = this.touch;
     const p = this.player.pending;
