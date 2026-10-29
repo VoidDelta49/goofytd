@@ -134,3 +134,59 @@ export async function acceptInvite(text) {
 }
 
 export const lanSupported = () => typeof RTCPeerConnection === 'function';
+
+/** Public STUN servers, used only to learn this network's public address (never for the game link). */
+const STUN = ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'];
+
+/**
+ * From an ICE candidate line, the address a STUN server saw ("srflx"), or null.
+ * IPv6 is cut to its /64 prefix: every device on a home network has its own
+ * IPv6 address but they share the prefix. Pure; tested.
+ */
+export function networkIdFromCandidate(line) {
+  const f = String(line).replace(/^a=/, '').split(/\s+/);
+  if (f.length < 8 || f[6] !== 'typ' || f[7] !== 'srflx') return null;
+  const addr = f[4];
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(addr)) return addr;
+  if (/^[0-9a-f:]+$/i.test(addr) && addr.includes(':')) {
+    // Expand "::" so 2001:db8::1 and 2001:0db8:0:0::2 compare equal.
+    const [head, tail] = addr.split('::');
+    const h = head ? head.split(':') : [];
+    const t = tail === undefined ? [] : tail ? tail.split(':') : [];
+    const groups = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t];
+    if (groups.length !== 8) return null;
+    return `${groups.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(':')}::/64`;
+  }
+  return null;
+}
+
+/**
+ * This network's public identity (its public IPv4, or IPv6 /64), via STUN.
+ * Farmers behind the same router get the same answer. Null if STUN is blocked
+ * or slow (then only room codes and invite links work).
+ */
+export async function publicNetworkId(timeoutMs = 2500) {
+  if (!lanSupported()) return null;
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: STUN }] });
+  try {
+    pc.createDataChannel('probe');
+    const found = new Promise((resolve) => {
+      let v6 = null;
+      const done = (v) => { clearTimeout(timer); resolve(v); };
+      const timer = setTimeout(() => done(v6), timeoutMs);
+      pc.addEventListener('icecandidate', (e) => {
+        if (!e.candidate) { done(v6); return; }
+        const id = networkIdFromCandidate(e.candidate.candidate);
+        if (!id) return;
+        if (id.endsWith('/64')) v6 ??= id; // prefer IPv4: it's what a whole NAT'd home shares
+        else done(id);
+      });
+    });
+    await pc.setLocalDescription(await pc.createOffer());
+    return await found;
+  } catch {
+    return null;
+  } finally {
+    pc.close();
+  }
+}

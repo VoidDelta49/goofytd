@@ -18,7 +18,7 @@
         "./src/client/hud.js": "./src/client/hud.js?v=f7ae6b2b53",
         "./src/client/input.js": "./src/client/input.js?v=7ee3472989",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
-        "./src/client/main-menu.js": "./src/client/main-menu.js?v=12bd6a365b",
+        "./src/client/main-menu.js": "./src/client/main-menu.js?v=27b04ff35f",
         "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
         "./src/client/render.js": "./src/client/render.js?v=b3d15c77e4",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
@@ -28,8 +28,10 @@
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
         "./src/level.js": "./src/level.js?v=791f06864a",
         "./src/main.js": "./src/main.js?v=f30373d68b",
+        "./src/net/discovery.js": "./src/net/discovery.js?v=dc2bd3fed0",
         "./src/net/lockstep.js": "./src/net/lockstep.js?v=ad417f39ba",
-        "./src/net/peer.js": "./src/net/peer.js?v=64bccb7003",
+        "./src/net/peer.js": "./src/net/peer.js?v=33aa05ca05",
+        "./src/net/relay.js": "./src/net/relay.js?v=49b03200d1",
         "./src/net/session.js": "./src/net/session.js?v=dbd36605c3",
         "./src/net/signal.js": "./src/net/signal.js?v=28bdd77224",
         "./src/net/track.js": "./src/net/track.js?v=cb2074a155",
@@ -489,7 +491,27 @@
     #mainmenu li i { width: 14px; height: 14px; border-radius: 4px; flex: none; box-shadow: inset 0 0 0 2px #0004; }
     #mainmenu li small { margin-left: auto; opacity: 0.7; }
     #mainmenu li.empty { opacity: 0.45; font-style: italic; }
+    #mainmenu .mm-room { display: grid; justify-items: center; gap: 2px; padding: 10px; border-radius: 14px; background: #ffd84d1a; border: 2px dashed #ffd84d88; text-align: center; }
+    #mainmenu .mm-room small { font-size: 11px; letter-spacing: 3px; opacity: 0.8; }
+    #mainmenu .mm-room b { font-size: 46px; line-height: 1.1; letter-spacing: 10px; color: #ffd84d; padding-left: 10px; user-select: text; -webkit-user-select: text; }
+    #mainmenu .mm-room span { font-size: 12px; opacity: 0.85; }
+    #mainmenu .mm-room button { margin-top: 6px; min-height: 36px; font-size: 13px; }
+    #mainmenu .mm-label { font-size: 11px; letter-spacing: 2px; opacity: 0.8; margin: 2px 0 6px; }
+    #mainmenu .mm-farms { margin-bottom: 10px; }
+    #mainmenu .mm-farms button { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; border-color: #9be38a; }
+    #mainmenu .mm-farms button small { margin-left: auto; opacity: 0.8; font-weight: 500; }
+    #mainmenu .mm-farms li.searching { justify-content: center; opacity: 0.7; font-style: italic; }
+    #mainmenu .mm-coderow { display: flex; gap: 8px; }
+    #mainmenu .mm-coderow input { flex: 1; font-size: 22px; letter-spacing: 6px; text-transform: uppercase; text-align: center; }
+    #mainmenu .mm-coderow button { min-width: 96px; }
+    #mainmenu details.mm-manual { display: grid; gap: 8px; }
+    #mainmenu details.mm-manual summary { cursor: pointer; font-size: 12px; opacity: 0.7; text-align: center; list-style: none; padding: 4px; }
+    #mainmenu details.mm-manual summary::-webkit-details-marker { display: none; }
+    #mainmenu details.mm-manual[open] summary { margin-bottom: 8px; }
+    #mainmenu details.mm-manual > * + * { margin-top: 8px; }
+    #mainmenu details.mm-manual > button { width: 100%; }
     @media (max-height: 520px) {
+      #mainmenu .mm-room b { font-size: 34px; }
       #mainmenu .mm-card { width: min(620px, 100%); padding: 12px 14px; gap: 8px; }
       #mainmenu h1 { font-size: 36px; }
       #mainmenu .mm-tag { display: none; }
@@ -574,38 +596,59 @@
           <button data-mm="join">JOIN LAN CO-OP</button>
         </div>
         <button data-mm="playground">MOVEMENT PLAYGROUND</button>
-        <p class="mm-small">Co-op: up to 4 farmers on the same Wi-Fi share one wallet, and every extra farmer adds +50% to all income.</p>
+        <p class="mm-small">Co-op: up to 4 farmers on the same Wi-Fi find each other automatically, share one wallet, and every extra farmer adds +50% to all income.</p>
       </section>
       <section data-screen="host" hidden>
         <h2>HOSTING</h2>
-        <ol data-mm="players"></ol>
-        <div class="mm-step" data-mm="inviteBox" hidden>
-          <div><b>1.</b> Send this invite link to a farmer on your Wi-Fi:</div>
-          <textarea data-mm="inviteOut" readonly></textarea>
-          <div class="mm-copy"><button data-mm="copyInvite">COPY</button><button data-mm="shareInvite">SHARE</button></div>
-          <div><b>2.</b> Paste the reply code they send back:</div>
-          <textarea data-mm="replyIn" placeholder="MOO1a…"></textarea>
-          <button data-mm="connect">CONNECT</button>
+        <div class="mm-room">
+          <small>ROOM CODE</small>
+          <b data-mm="roomCode">····</b>
+          <span data-mm="roomNote">Farmers on your Wi-Fi will see your farm by themselves.</span>
+          <button data-mm="shareRoom" hidden>SHARE LINK</button>
         </div>
-        <button data-mm="invite" hidden>+ INVITE ANOTHER FARMER</button>
+        <ol data-mm="players"></ol>
         <p class="mm-status" data-mm="hostStatus"></p>
         <button class="primary" data-mm="start">START GAME</button>
+        <details class="mm-manual" data-mm="hostManual">
+          <summary>No internet? Use an invite link instead</summary>
+          <div class="mm-step" data-mm="inviteBox" hidden>
+            <div><b>1.</b> Send this invite link to a farmer on your Wi-Fi:</div>
+            <textarea data-mm="inviteOut" readonly></textarea>
+            <div class="mm-copy"><button data-mm="copyInvite">COPY</button><button data-mm="shareInvite">SHARE</button></div>
+            <div><b>2.</b> Paste the reply code they send back:</div>
+            <textarea data-mm="replyIn" placeholder="MOO1a…"></textarea>
+            <button data-mm="connect">CONNECT</button>
+          </div>
+          <button data-mm="invite">MAKE AN INVITE LINK</button>
+        </details>
         <button data-mm="back">BACK</button>
       </section>
       <section data-screen="join" hidden>
         <h2>JOINING</h2>
-        <div class="mm-step" data-mm="inviteInBox">
-          <div><b>1.</b> Paste the host's invite (link or code):</div>
-          <textarea data-mm="inviteIn" placeholder="MOO1o… or the invite link"></textarea>
-          <button data-mm="makeReply">MAKE REPLY CODE</button>
-        </div>
-        <div class="mm-step" data-mm="replyBox" hidden>
-          <div><b>2.</b> Send this reply code back to the host:</div>
-          <textarea data-mm="replyOut" readonly></textarea>
-          <div class="mm-copy"><button data-mm="copyReply">COPY</button><button data-mm="shareReply">SHARE</button></div>
+        <div data-mm="lookBox">
+          <div class="mm-label">FARMS ON YOUR WI-FI</div>
+          <ol class="mm-farms" data-mm="farms"></ol>
+          <div class="mm-label">OR TYPE A ROOM CODE</div>
+          <div class="mm-coderow">
+            <input data-mm="codeIn" maxlength="6" placeholder="K7QM" autocomplete="off" autocapitalize="characters" spellcheck="false">
+            <button data-mm="joinCode">JOIN</button>
+          </div>
         </div>
         <ol data-mm="joinPlayers" hidden></ol>
         <p class="mm-status" data-mm="joinStatus"></p>
+        <details class="mm-manual" data-mm="joinManual">
+          <summary>No internet? Paste an invite link instead</summary>
+          <div class="mm-step" data-mm="inviteInBox">
+            <div><b>1.</b> Paste the host's invite (link or code):</div>
+            <textarea data-mm="inviteIn" placeholder="MOO1o… or the invite link"></textarea>
+            <button data-mm="makeReply">MAKE REPLY CODE</button>
+          </div>
+          <div class="mm-step" data-mm="replyBox" hidden>
+            <div><b>2.</b> Send this reply code back to the host:</div>
+            <textarea data-mm="replyOut" readonly></textarea>
+            <div class="mm-copy"><button data-mm="copyReply">COPY</button><button data-mm="shareReply">SHARE</button></div>
+          </div>
+        </details>
         <button data-mm="back">BACK</button>
       </section>
     </div>
