@@ -7,7 +7,7 @@ import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
 import { CowHash } from './cowhash.js';
-import { ABILITY_COOLDOWN, ABILITY_WINDUP, CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
+import { ABILITY_COOLDOWN, ABILITY_WINDUP, CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, MAX_COW_RADIUS, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, WRECK_REFUND, REPAIR_DELAY, REPAIR_RATE, TOWER_TYPES, TOWER_FORMS, towerMaxHp } from './towers.js';
 import { mulberry32 } from './rng.js';
 import { SURPRISES, surpriseChance, pickSurprise } from './surprises.js';
@@ -977,7 +977,8 @@ export class Game {
   /** Damage every cow within `radius` of (x, z): flyers for an airburst (`air`), otherwise walkers. */
   splash(x, z, radius, damage, tower, air = false) {
     const { cows } = this;
-    for (let i = cows.count - 1; i >= 0; i--) {
+    // High-to-low like a backwards scan: a kill moves the last cow (already handled) into its slot.
+    for (const i of this.cowHash.near(cows, x, z, radius + MAX_COW_RADIUS())) {
       const type = COW_TYPE_LIST[cows.type[i]];
       if ((type.altitude > 0) !== air) continue; // ground shells land under flyers; airbursts go off over walkers
       const dx = cows.x[i] - x, dz = cows.z[i] - z;
@@ -1039,7 +1040,7 @@ export class Game {
   spreadBurn(x, z, radius, dps, time, towerId) {
     const { cows } = this;
     let n = 0;
-    for (let k = 0; k < cows.count; k++) {
+    for (const k of this.cowHash.near(cows, x, z, radius + MAX_COW_RADIUS(), false)) {
       const type = COW_TYPE_LIST[cows.type[k]];
       if (type.altitude > 0) continue;
       const r = radius + type.radius, dx = cows.x[k] - x, dz = cows.z[k] - z;
