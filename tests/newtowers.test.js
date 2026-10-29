@@ -18,8 +18,8 @@ function fieldGame(over = {}) {
 
 function put(g, type, x, z, hp) {
   const i = g.spawnCow(type, x, z, hp);
-  g.cows.x[i] = g.cows.px[i] = x;
-  g.cows.z[i] = g.cows.pz[i] = z;
+  g.cows.x[i] = g.cows.prevX[i] = x;
+  g.cows.z[i] = g.cows.prevZ[i] = z;
   return i;
 }
 
@@ -54,7 +54,7 @@ test('frother: one jet soaks every walker in its cone (through Tin armour, no re
     // The jet, then the first sliver of burn the same tick.
     assertClose(hpOf(g, id), hp - t.def.damage - t.def.burn.dps * DT, 1e-9, 'cow in the jet');
     const i = slotOf(g, id);
-    assert(g.cows.burnT[i] > 0 && g.cows.burnD[i] === t.def.burn.dps, 'not burning');
+    assert(g.cows.burnTime[i] > 0 && g.cows.burnDps[i] === t.def.burn.dps, 'not burning');
     assert(g.cows.hitAge[i] > 1, 'spray made a cow flash red');
   }
   assert(hpOf(g, behind) === hp, 'hit a cow behind it');
@@ -78,7 +78,7 @@ test('frother: burns deal dps × time, credit the tower, and a weaker burn never
   g.igniteCow(i, 4, 5, 0, t.id); // weaker: ignored
   run(g, 3);
   assertClose(1000 - g.cows.hp[0], 20, 1e-6, 'burn total');
-  assert(g.cows.burnT[0] <= 0, 'still burning');
+  assert(g.cows.burnTime[0] <= 0, 'still burning');
   // Burn kills count for the tower that lit it.
   const k = put(g, COW_TYPES.cow, -30, -60, 1);
   g.igniteCow(k, 10, 1, 0, t.id);
@@ -95,10 +95,10 @@ test('frother: flambé — a burning cow that drops lights the cows around it (o
   g.igniteCow(dying, 20, 4, 2.5, t.id);
   g.tick(DT);
   const n = slotOf(g, near), f = slotOf(g, far);
-  assert(g.cows.burnT[n] > 0 && g.cows.burnD[n] === 20, 'neighbour did not catch fire');
-  assert(g.cows.burnS[n] === 0, 'second-hand burns should not spread further');
-  assertClose(g.cows.burnT[n], (4 - DT) * 0.75, 1e-9, 'second-hand burn lasts 75% of what the burner had left');
-  assert(g.cows.burnT[f] === 0, 'a cow 10 m away caught fire');
+  assert(g.cows.burnTime[n] > 0 && g.cows.burnDps[n] === 20, 'neighbour did not catch fire');
+  assert(g.cows.burnSpread[n] === 0, 'second-hand burns should not spread further');
+  assertClose(g.cows.burnTime[n], (4 - DT) * 0.75, 1e-9, 'second-hand burn lasts 75% of what the burner had left');
+  assert(g.cows.burnTime[f] === 0, 'a cow 10 m away caught fire');
   assert(g.events.some((e) => e.kind === 'flambe' && e.count === 1), 'no flambé event');
 });
 
@@ -109,8 +109,8 @@ test('frother: soft-serve brain freeze slows cows and makes every hit land harde
   g.tick(DT);
   const i = slotOf(g, id);
   const { chill } = t.def;
-  assert(g.cows.chillT[i] > 0 && g.cows.chillV[i] === chill.vuln, 'not frozen');
-  assert(g.cows.slowF[i] === chill.slow, 'not slowed');
+  assert(g.cows.chillTime[i] > 0 && g.cows.chillMult[i] === chill.vuln, 'not frozen');
+  assert(g.cows.slowMult[i] === chill.slow, 'not slowed');
   // The jet's own hit already counts the freeze.
   assertClose(1000 - g.cows.hp[i], t.def.damage * chill.vuln, 1e-9, 'first jet');
   // Any other tower's hit is multiplied too.
@@ -119,7 +119,7 @@ test('frother: soft-serve brain freeze slows cows and makes every hit land harde
   assertClose(before - g.cows.hp[i], 10 * chill.vuln, 1e-9, 'brittle hit');
   g.sellTower(t.id);
   run(g, chill.time + 0.1);
-  assert(g.cows.chillT[i] <= 0 && g.cows.chillV[i] === 1, 'never thawed');
+  assert(g.cows.chillTime[i] <= 0 && g.cows.chillMult[i] === 1, 'never thawed');
 });
 
 test('sniper: targets the toughest cow far away; only a scope spots a distant Ninja', () => {
@@ -225,7 +225,7 @@ function efficiency(formId, cowType, every, perSpawn, hpx = 40, secs = 50) {
   let dmg = 0, hpTotal = 0, timer = 0;
   const orig = g.damageCow.bind(g);
   g.damageCow = (i, d, tw, f, p) => {
-    const real = g.cows.chillT[i] > 0 ? d * g.cows.chillV[i] : d;
+    const real = g.cows.chillTime[i] > 0 ? d * g.cows.chillMult[i] : d;
     dmg += Math.min(real, Math.max(0, g.cows.hp[i]));
     return orig(i, d, tw, f, p);
   };

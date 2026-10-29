@@ -3,7 +3,7 @@
 import { test, assert } from './harness.js';
 import { levelCollision, openField } from '../src/level.js';
 import { Game, defaultGameConfig } from '../src/sim/game.js';
-import { COW_TYPES, COW_TYPE_LIST, waveMix, pickFromMix, cowDebuts } from '../src/sim/cows.js';
+import { ABILITY_COOLDOWN, COW_FIELDS, CowPool, defineCowField, COW_TYPES, COW_TYPE_LIST, waveMix, pickFromMix, cowDebuts } from '../src/sim/cows.js';
 
 const DT = 1 / 64;
 
@@ -75,7 +75,7 @@ test('cows: Zoomies beat a plain cow to the milk, Big Cows are slow, tanky and s
   const g = fieldGame();
   for (let k = 0; k < 20; k++) {
     const i = g.spawnCow(COW_TYPES.big, 0, -60);
-    assert(Math.abs(g.cows.ox[i]) <= 0.1 + 1e-9 && Math.abs(g.cows.oz[i]) <= 0.1 + 1e-9, 'big cow offset too wide');
+    assert(Math.abs(g.cows.offsetX[i]) <= 0.1 + 1e-9 && Math.abs(g.cows.offsetZ[i]) <= 0.1 + 1e-9, 'big cow offset too wide');
   }
 });
 
@@ -201,4 +201,21 @@ test('cows: mixed waves with explosions stay deterministic', () => {
   };
   const a = play(), b = play();
   assert(a === b, `${a} != ${b}`);
+});
+
+test('cows: every declared field is allocated, set on spawn and moved on remove', () => {
+  const pool = new CowPool(4);
+  const t = COW_TYPES.spitter;
+  for (const f of COW_FIELDS) assert(pool[f.name] instanceof f.array && pool[f.name].length === 4, `${f.name} not allocated`);
+  const a = pool.spawn(t, 1, 2, 0.1, 0.2);
+  assert(pool.x[a] === 1 && pool.prevZ[a] === 2 && pool.offsetZ[a] === 0.2 && pool.type[a] === t.index, 'spawn values');
+  assert(pool.slowMult[a] === 1 && pool.chillMult[a] === 1 && pool.abilityState[a] === ABILITY_COOLDOWN, 'defaults');
+  assert(pool.abilityTime[a] === t.abilityCooldown * 0.4, 'spitter starts on a short cooldown');
+  const b = pool.spawn(COW_TYPES.cow, 5, 6, 0, 0);
+  pool.burnDps[b] = 7;
+  pool.remove(a);
+  assert(pool.count === 1 && pool.x[0] === 5 && pool.burnDps[0] === 7 && pool.id[0] === 2, 'remove moves the last cow into the slot');
+  let threw = false;
+  try { defineCowField('late', Float64Array); } catch { threw = true; }
+  assert(threw, 'defining a field after a pool exists must throw');
 });

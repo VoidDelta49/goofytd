@@ -18,8 +18,8 @@ function fieldGame(over = {}) {
 
 function put(g, id, x, z, hp) {
   const i = g.spawnCow(COW_TYPES[id], x, z, hp ?? COW_TYPES[id].hp);
-  g.cows.x[i] = g.cows.px[i] = x;
-  g.cows.z[i] = g.cows.pz[i] = z;
+  g.cows.x[i] = g.cows.prevX[i] = x;
+  g.cows.z[i] = g.cows.prevZ[i] = z;
   return i;
 }
 

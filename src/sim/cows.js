@@ -207,84 +207,108 @@ for (const t of COW_TYPE_LIST) {
   if (t.splitInto && !COW_TYPES[t.splitInto]) throw new Error(`cow type ${t.id}: splits into unknown ${t.splitInto}`);
 }
 
+// ---- live cow state ----------------------------------------------------------
+//
+// Every per-cow value is one typed array, declared once in the table below.
+// To give cows new state, add a defineCowField() line next to the feature
+// that uses it: the pool allocates, spawns, removes and clears it for you.
+// Read and write it as `cows.<name>[slot]`.
+
+/** Cow ability phases, in `cows.abilityState`. */
+export const ABILITY_COOLDOWN = 0;
+export const ABILITY_WINDUP = 1;
+
+/** Declared fields, in declaration order: { name, array, spawn, doc }. */
+export const COW_FIELDS = [];
+let poolsMade = false;
+
 /**
- * Live cows, densely packed in slots 0..count-1. Removing a cow moves the
- * last cow into its slot, so iteration never skips holes. Nothing outside
- * holds a slot index across ticks (tower shots resolve the same tick).
+ * Declare a per-cow array.
+ * @param {string} name   property name on the pool (`cows.name[slot]`)
+ * @param {Function} array typed array constructor (Float64Array, Uint8Array, ...)
+ * @param {number | ((type: object, at: {x:number,z:number,offsetX:number,offsetZ:number,id:number}) => number)} spawn
+ *   value a freshly spawned cow gets: a constant, or computed from its type and spawn point
+ * @param {string} doc    what it means (shows up in COW_FIELDS for tooling)
+ */
+export function defineCowField(name, array, spawn = 0, doc = '') {
+  if (poolsMade) throw new Error(`cow field ${name}: define fields before the first CowPool`);
+  if (COW_FIELDS.some((f) => f.name === name)) throw new Error(`cow field ${name} defined twice`);
+  if (['count', 'capacity', 'nextId', 'spawn', 'remove', 'clear'].includes(name)) throw new Error(`cow field ${name}: reserved name`);
+  COW_FIELDS.push(Object.freeze({ name, array, spawn, doc }));
+}
+
+// Identity and health
+defineCowField('id', Uint32Array, (t, at) => at.id, 'stable id, so renderers, replays and bosses can tell cows apart (slots move)');
+defineCowField('type', Uint8Array, (t) => t.index, 'index into COW_TYPE_LIST');
+defineCowField('hp', Float64Array, (t) => t.hp, 'current HP (Game.spawnCow scales it per wave)');
+defineCowField('maxHp', Float64Array, (t) => t.hp, 'HP at spawn after wave scaling, for heals, enrage and boss phases');
+defineCowField('hitAge', Float64Array, Infinity, 'seconds since last hit, for the damage flash');
+
+// Movement
+defineCowField('x', Float64Array, (t, at) => at.x, 'position (m)');
+defineCowField('z', Float64Array, (t, at) => at.z);
+defineCowField('prevX', Float64Array, (t, at) => at.x, 'position at the previous tick, for render interpolation');
+defineCowField('prevZ', Float64Array, (t, at) => at.z);
+defineCowField('vx', Float64Array, 0, 'velocity (m/s)');
+defineCowField('vz', Float64Array, 0);
+defineCowField('offsetX', Float64Array, (t, at) => at.offsetX, 'fixed aim offset inside each cell, so a herd spreads out instead of walking single file');
+defineCowField('offsetZ', Float64Array, (t, at) => at.offsetZ);
+
+// Slows (molasses, butter slick, glue, boss resist applied by the tower)
+defineCowField('slowTime', Float64Array, 0, 'seconds of slow left');
+defineCowField('slowMult', Float64Array, 1, 'speed multiplier while slowed (0 = stuck)');
+
+// Headbutt Heifer / Cud Spitter attacks
+defineCowField('abilityState', Uint8Array, ABILITY_COOLDOWN, 'ABILITY_COOLDOWN or ABILITY_WINDUP');
+// Spitters wait a moment after spawning, so they don't all fire the second they walk in.
+defineCowField('abilityTime', Float64Array, (t) => (t.spitRange > 0 ? t.abilityCooldown * 0.4 : 0), 'seconds left of the wind-up or cooldown');
+defineCowField('abilityTarget', Uint32Array, 0, 'tower id being wound up at (an id, never a slot: towers can be sold or wrecked mid wind-up)');
+
+// On fire (Milk Frother family)
+defineCowField('burnTime', Float64Array, 0, 'seconds of burning left');
+defineCowField('burnDps', Float64Array, 0, 'burn damage per second');
+defineCowField('burnSpread', Float64Array, 0, 'a burning cow that dies lights cows within this many metres');
+defineCowField('burnSource', Uint32Array, 0, 'tower id credited with burn kills');
+
+// Brain freeze (Soft-Serve family)
+defineCowField('chillTime', Float64Array, 0, 'seconds of brain freeze left');
+defineCowField('chillMult', Float64Array, 1, 'damage taken from everything is multiplied by this while frozen');
+
+/**
+ * Live cows, densely packed in slots 0..count-1, one typed array per field
+ * in COW_FIELDS. Removing a cow moves the last cow into its slot, so
+ * iteration never skips holes. Nothing outside holds a slot index across
+ * ticks (tower shots resolve the same tick); hold `id`s instead.
  */
 export class CowPool {
   constructor(capacity = 4096) {
+    poolsMade = true;
     this.capacity = capacity;
     this.count = 0;
-    this.x = new Float64Array(capacity);
-    this.z = new Float64Array(capacity);
-    /** Position at the previous tick, for render interpolation. */
-    this.px = new Float64Array(capacity);
-    this.pz = new Float64Array(capacity);
-    this.vx = new Float64Array(capacity);
-    this.vz = new Float64Array(capacity);
-    /** Fixed per-cow aim offset inside each cell, so a herd spreads out instead of walking in single file. */
-    this.ox = new Float64Array(capacity);
-    this.oz = new Float64Array(capacity);
-    this.hp = new Float64Array(capacity);
-    /** HP at spawn (after wave scaling), for heals and enrage. */
-    this.maxHp = new Float64Array(capacity);
-    this.type = new Uint8Array(capacity);
-    /** Seconds since the cow was last hit, for a damage flash. */
-    this.hitAge = new Float64Array(capacity);
-    /** Stable id, so the renderer or a replay can tell cows apart. */
-    this.id = new Uint32Array(capacity);
-    /** Slowed (molasses, butter slick, glue): speed × slowF for slowT more seconds. */
-    this.slowT = new Float64Array(capacity);
-    this.slowF = new Float64Array(capacity);
-    /** Headbutt / spit: abilS 1 = winding up for abilT more s at tower abilTower; 0 = abilT s of cooldown left. */
-    this.abilT = new Float64Array(capacity);
-    this.abilS = new Uint8Array(capacity);
-    /** A tower id, never a slot (towers can be sold or wrecked mid wind-up). */
-    this.abilTower = new Uint32Array(capacity);
-    /** On fire (Milk Frother family): burnD hp/s for burnT more s, credited to tower burnTower; a dead burner lights cows within burnS m. */
-    this.burnT = new Float64Array(capacity);
-    this.burnD = new Float64Array(capacity);
-    this.burnS = new Float64Array(capacity);
-    this.burnTower = new Uint32Array(capacity);
-    /** Brain-frozen (Soft-Serve family): takes chillV × damage from everything for chillT more s. */
-    this.chillT = new Float64Array(capacity);
-    this.chillV = new Float64Array(capacity);
     this.nextId = 1;
-    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF, this.abilT, this.abilS, this.abilTower,
-      this.burnT, this.burnD, this.burnS, this.burnTower, this.chillT, this.chillV];
+    /** [array, spawn] per field, for spawn/remove. */
+    this.columns = COW_FIELDS.map((f) => {
+      const a = new f.array(capacity);
+      this[f.name] = a;
+      return [a, f.spawn];
+    });
+    this.at = { x: 0, z: 0, offsetX: 0, offsetZ: 0, id: 0 };
   }
 
-  /** Returns the slot, or -1 when full. */
-  spawn(type, x, z, ox, oz) {
+  /** Spawn a cow of `type` at (x, z) with a herd offset. Returns the slot, or -1 when full. */
+  spawn(type, x, z, offsetX, offsetZ) {
     if (this.count >= this.capacity) return -1;
     const i = this.count++;
-    this.x[i] = this.px[i] = x;
-    this.z[i] = this.pz[i] = z;
-    this.vx[i] = this.vz[i] = 0;
-    this.ox[i] = ox;
-    this.oz[i] = oz;
-    this.hp[i] = this.maxHp[i] = type.hp;
-    this.type[i] = type.index;
-    this.hitAge[i] = Infinity;
-    this.id[i] = this.nextId++;
-    this.slowT[i] = 0;
-    this.slowF[i] = 1;
-    // Spitters wait a moment after spawning, so they don't all fire the second they walk in.
-    this.abilT[i] = type.spitRange > 0 ? type.abilityCooldown * 0.4 : 0;
-    this.abilS[i] = 0;
-    this.abilTower[i] = 0;
-    this.burnT[i] = this.burnD[i] = this.burnS[i] = 0;
-    this.burnTower[i] = 0;
-    this.chillT[i] = 0;
-    this.chillV[i] = 1;
+    const at = this.at;
+    at.x = x; at.z = z; at.offsetX = offsetX; at.offsetZ = offsetZ; at.id = this.nextId++;
+    for (const [a, spawn] of this.columns) a[i] = typeof spawn === 'function' ? spawn(type, at) : spawn;
     return i;
   }
 
   remove(i) {
     const last = --this.count;
     if (i === last) return;
-    for (const a of this.fields) a[i] = a[last];
+    for (const [a] of this.columns) a[i] = a[last];
   }
 
   clear() { this.count = 0; }
