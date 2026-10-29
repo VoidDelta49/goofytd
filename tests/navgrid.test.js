@@ -62,3 +62,12 @@ test(`navgrid: ${navBackend} placement check (reachableWith) matches the JS one`
     assert(grid.extra.every((v) => v === 0), 'reachableWith left cells blocked');
   }
 });
+
+test(`navgrid: ${navBackend} grids stay readable after many more grids are made (WASM memory growth)`, () => {
+  const first = buildGrid(Object.values(LEVELS)[0]());
+  const before = Array.from(first.dist);
+  for (let k = 0; k < 40; k++) buildGrid(Object.values(LEVELS)[k % Object.keys(LEVELS).length]());
+  assert(first.dist.length === before.length && before.every((v, i) => Object.is(v, first.dist[i])), 'old grid lost its arrays');
+  first.rebuild();
+  assert(before.every((v, i) => Object.is(v, first.dist[i])), 'old grid rebuilt differently');
+});

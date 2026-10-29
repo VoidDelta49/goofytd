@@ -175,42 +175,37 @@ export class JsNavGrid {
 }
 
 /**
- * Same grid, arrays in WASM memory, rebuild/flood in Rust. Views are
- * re-made whenever WASM memory grows (growing detaches the old buffer),
- * so read the arrays through the getters, not a long-lived local.
+ * Same grid, arrays in WASM memory, rebuild/flood in Rust. The arrays are
+ * plain properties (typed-array views), as fast to read as the JS grid's.
+ * WASM memory only grows when a grid is allocated, and growing detaches
+ * every old view, so each allocation re-points all live grids' views.
  */
 class WasmNavGrid extends JsNavGrid {
   alloc() {
     this.ptr = wasm.nav_new(this.w, this.h, this.cell);
-    this.buf = null;
     freeGrid.register(this, this.ptr);
-  }
-
-  views() {
-    const buf = wasm.memory.buffer;
-    if (buf !== this.buf) {
-      const n = this.w * this.h, p = (k) => wasm.nav_ptr(this.ptr, k);
-      this.buf = buf;
-      this.v = {
-        solid: new Uint8Array(buf, p(0), n),
-        tower: new Int32Array(buf, p(1), n),
-        goal: new Uint8Array(buf, p(2), n),
-        dist: new Float64Array(buf, p(3), n),
-        next: new Int32Array(buf, p(4), n),
-        extra: new Uint8Array(buf, p(5), n),
-        seen: new Uint8Array(buf, p(6), n),
-      };
+    liveGrids.add(new WeakRef(this));
+    if (wasm.memory.buffer !== viewBuffer) {
+      viewBuffer = wasm.memory.buffer;
+      for (const ref of liveGrids) {
+        const g = ref.deref();
+        if (g) g.makeViews(viewBuffer); else liveGrids.delete(ref);
+      }
+    } else {
+      this.makeViews(viewBuffer);
     }
-    return this.v;
   }
 
-  get solid() { return this.views().solid; }
-  get tower() { return this.views().tower; }
-  get goal() { return this.views().goal; }
-  get dist() { return this.views().dist; }
-  get next() { return this.views().next; }
-  get extra() { return this.views().extra; }
-  get seen() { return this.views().seen; }
+  makeViews(buf) {
+    const n = this.w * this.h, p = (k) => wasm.nav_ptr(this.ptr, k);
+    this.solid = new Uint8Array(buf, p(0), n);
+    this.tower = new Int32Array(buf, p(1), n);
+    this.goal = new Uint8Array(buf, p(2), n);
+    this.dist = new Float64Array(buf, p(3), n);
+    this.next = new Int32Array(buf, p(4), n);
+    this.extra = new Uint8Array(buf, p(5), n);
+    this.seen = new Uint8Array(buf, p(6), n);
+  }
 
   rebuild() {
     wasm.nav_rebuild(this.ptr);
@@ -218,16 +213,18 @@ class WasmNavGrid extends JsNavGrid {
   }
 
   reachableWith(blocked, mustReach) {
-    const { extra } = this.views();
+    const { extra, seen } = this;
     for (const i of blocked) extra[i] = 1;
     wasm.nav_flood(this.ptr);
-    const { seen } = this.views();
     for (const i of blocked) extra[i] = 0;
     for (const i of mustReach) if (!seen[i]) return false;
     return true;
   }
 }
 
+/** Grids whose views must follow WASM memory when it grows. */
+const liveGrids = new Set();
+let viewBuffer = null;
 const freeGrid = wasm ? new FinalizationRegistry((ptr) => wasm.nav_free(ptr)) : null;
 
 /** The grid the sim uses: Rust-backed when sim.wasm loaded, JS otherwise. */
