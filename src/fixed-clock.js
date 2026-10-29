@@ -19,12 +19,18 @@ export class FixedClock {
     this.tickCount = 0;
   }
 
-  /** Add `seconds` of real time. Returns how many ticks to run now. */
-  advance(seconds) {
-    this.accumulator += Math.max(seconds, 0);
+  /**
+   * Add `seconds` of real time. Returns how many ticks to run now.
+   * `scale` runs time faster (fast-forward): 2 = twice as many ticks for the
+   * same real time. Each tick is still exactly `dt`, so the result is the same
+   * as playing at 1x, only sooner; the per-frame cap scales with it.
+   */
+  advance(seconds, scale = 1) {
+    this.accumulator += Math.max(seconds, 0) * scale;
+    const cap = this.maxTicks * scale;
     let n = Math.floor(this.accumulator / this.dt);
-    if (n > this.maxTicks) {
-      n = this.maxTicks;
+    if (n > cap) {
+      n = cap;
       this.accumulator = n * this.dt;
     }
     this.accumulator -= n * this.dt;

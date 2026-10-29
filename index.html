@@ -17,21 +17,21 @@
         "./src/client/build.js": "./src/client/build.js?v=aa882b37a4",
         "./src/client/cull.js": "./src/client/cull.js?v=b66ed8ca26",
         "./src/client/farmers.js": "./src/client/farmers.js?v=d7745ec03a",
-        "./src/client/hud.js": "./src/client/hud.js?v=31373bf982",
-        "./src/client/input.js": "./src/client/input.js?v=ba12aa2966",
+        "./src/client/hud.js": "./src/client/hud.js?v=bc3cc9bd96",
+        "./src/client/input.js": "./src/client/input.js?v=b60fd21e29",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
         "./src/client/main-menu.js": "./src/client/main-menu.js?v=27b04ff35f",
-        "./src/client/menu.js": "./src/client/menu.js?v=7915ee55ce",
+        "./src/client/menu.js": "./src/client/menu.js?v=f94a871c73",
         "./src/client/render.js": "./src/client/render.js?v=c6fadc3432",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
         "./src/client/td-render.js": "./src/client/td-render.js?v=1479b1ee81",
-        "./src/client/touch.js": "./src/client/touch.js?v=d975603b30",
+        "./src/client/touch.js": "./src/client/touch.js?v=ce6d5da16e",
         "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=e8e30fd00a",
-        "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
+        "./src/fixed-clock.js": "./src/fixed-clock.js?v=686451ec26",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=dc96aa9e24",
+        "./src/main.js": "./src/main.js?v=f0dffa05af",
         "./src/net/discovery.js": "./src/net/discovery.js?v=dc2bd3fed0",
-        "./src/net/lockstep.js": "./src/net/lockstep.js?v=ad417f39ba",
+        "./src/net/lockstep.js": "./src/net/lockstep.js?v=93eca31ea4",
         "./src/net/peer.js": "./src/net/peer.js?v=33aa05ca05",
         "./src/net/relay.js": "./src/net/relay.js?v=49b03200d1",
         "./src/net/session.js": "./src/net/session.js?v=dbd36605c3",
@@ -39,9 +39,9 @@
         "./src/net/track.js": "./src/net/track.js?v=cb2074a155",
         "./src/player.js": "./src/player.js?v=7536aa98e4",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
-        "./src/sim/commands.js": "./src/sim/commands.js?v=857cda019b",
+        "./src/sim/commands.js": "./src/sim/commands.js?v=37070bdc8f",
         "./src/sim/cows.js": "./src/sim/cows.js?v=e8bb8c30d1",
-        "./src/sim/game.js": "./src/sim/game.js?v=17d07fd7ba",
+        "./src/sim/game.js": "./src/sim/game.js?v=fc9291b8e4",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
@@ -204,6 +204,12 @@
     }
     #touch [data-touch=pause] { right: calc(12px + env(safe-area-inset-right)); }
     #touch [data-touch=wave] { right: calc(116px + env(safe-area-inset-right)); }
+    /* Fast-forward sits under PAUSE (the right edge is free on touch: milk and moolah moved left),
+       low enough to clear the START WAVE 1 button on a 360 px wide phone. */
+    #touch [data-touch=ff] {
+      height: 38px; top: calc(112px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); padding: 0 12px; flex-direction: row;
+    }
+    #touch [data-touch=ff].on { border-color: #ffd84d; color: #ffd84d; }
     /* Milk and moolah go under the speed readout on the left, keeping the right edge free for the buttons. */
     body.touch-device #hud .td {
       right: auto; left: calc(14px + env(safe-area-inset-left)); top: calc(62px + env(safe-area-inset-top)); text-align: left;
@@ -560,7 +566,7 @@
       <b class="desk-only">Click to play</b>
       <b class="touch-only">Tap to play</b>
       <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
-      <div class="desk-only"><kbd>1</kbd>–<kbd>6</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
+      <div class="desk-only"><kbd>1</kbd>–<kbd>6</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave · <kbd>G</kbd> fast-forward</div>
       <div class="desk-only"><kbd>P</kbd> pause · <kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>M</kbd> mute · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
       <div class="touch-only">Left thumb: move · drag the right side to look</div>
       <div class="touch-only">Drag from the jump button to steer mid-air</div>
@@ -578,6 +584,7 @@
     <button class="pill" data-touch="upgrade" aria-label="Upgrade the tower you are looking at"><b>UPGRADE</b><small>look at a tower</small></button>
     <button class="pill" data-touch="wave" aria-label="Start the next wave now" hidden><b>▶▶ NEXT WAVE</b></button>
     <button class="pill" data-touch="pause" aria-label="Pause and open the menu"><b>❚❚ PAUSE</b></button>
+    <button class="pill" data-touch="ff" aria-label="Fast-forward: switch game speed between 1×, 2× and 3×"><b>▶▶ 1×</b></button>
   </div>
   <div id="upgrade" hidden><div class="up-sheet" role="dialog" aria-label="Tower upgrades"></div></div>
   <div id="pause" hidden>
@@ -587,6 +594,7 @@
       <button data-menu="sound">SOUND: ON</button>
       <button data-menu="autoHop">AUTO-HOP: OFF</button>
       <button data-menu="autoUpgrade" title="Towers buy their next upgrade by themselves (T)">AUTO-UPGRADE: OFF</button>
+      <button data-menu="speed" title="Fast-forward the cows and towers: 1×, 2×, 3× (G)">GAME SPEED: 1×</button>
       <div class="sens">
         <button data-menu="sensDown" aria-label="Look slower">−</button>
         <span data-menu="sensLabel">LOOK SPEED</span>

@@ -98,15 +98,17 @@ export class Lockstep {
    * How many sim ticks to run this frame, given how many the fixed clock
    * allows. Host and local follow the clock. A client can only run ticks it
    * has; it runs a few extra when it's falling behind and holds a couple back
-   * so a late packet doesn't stall it.
+   * so a late packet doesn't stall it. `scale` is the match's fast-forward
+   * setting: the clock already gives `scale`x the ticks, and the catch-up cap
+   * grows with it so a fast-forwarding client can keep up with its host.
    */
-  ticksToRun(clockTicks) {
+  ticksToRun(clockTicks, scale = 1) {
     if (this.role !== 'client') return clockTicks;
     const have = this.queue.length;
     let n = clockTicks;
     const surplus = have - n - CLIENT_BUFFER;
     if (surplus > 0) n += Math.ceil(surplus / 2);
-    return Math.max(0, Math.min(n, have, MAX_CATCHUP));
+    return Math.max(0, Math.min(n, have, MAX_CATCHUP * scale));
   }
 
   /** The commands for the next tick (removing them from the queue). Call ticksToRun() first. */

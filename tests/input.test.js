@@ -255,7 +255,7 @@ test('touch buttons: NEXT WAVE hides before wave 1 (START button) and after losi
 
 function fakeMenu(state) {
   const els = {};
-  for (const n of ['sound', 'autoHop', 'autoUpgrade', 'sensLabel', 'restart']) {
+  for (const n of ['sound', 'autoHop', 'autoUpgrade', 'speed', 'sensLabel', 'restart']) {
     els[n] = { textContent: '', classList: { on: false, toggle(_c, v) { this.on = v; } }, dataset: { menu: n } };
   }
   const root = { hidden: true, addEventListener() {}, querySelector: (sel) => els[/data-menu=(\w+)/.exec(sel)[1]] };

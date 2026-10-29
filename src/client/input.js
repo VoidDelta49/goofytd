@@ -36,13 +36,14 @@ export const BINDINGS = {
   autoUpgrade: ['KeyT'],
   cancelBuild: ['KeyQ'],
   nextWave: ['KeyN'],
+  fastForward: ['KeyG'],
   restart: ['Enter'],
   mute: ['KeyM'],
   pause: ['KeyP'],
 };
 
 /** Actions forwarded to `Input.handlers` (set by main.js) on key down. */
-const HANDLED_ACTIONS = ['place', 'sell', 'upgrade', 'autoUpgrade', 'cancelBuild', 'nextWave', 'restart', 'mute'];
+const HANDLED_ACTIONS = ['place', 'sell', 'upgrade', 'autoUpgrade', 'cancelBuild', 'nextWave', 'fastForward', 'restart', 'mute'];
 
 const SETTINGS_KEY = 'goofytd.settings';
 

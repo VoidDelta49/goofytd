@@ -87,6 +87,9 @@ export const FOG_SIGHT_CUT = 0.35;
 /** Auto-upgrade: seconds between automatic buys, so each one gets its own pop and sound. */
 export const AUTO_EVERY = 0.4;
 
+/** Fast-forward settings (sim ticks per real tick). The `speed` command cycles through them. */
+export const GAME_SPEEDS = Object.freeze([1, 2, 3]);
+
 export class Game {
   /**
    * @param {{blocks:{surface:string,aabb:Aabb}[], spawners?:{x:number,z:number}[]}} level
@@ -108,6 +111,13 @@ export class Game {
     this.autoUpgrade = false;
     /** Form id -> the variant auto-upgrade takes at that path choice (set by buying one, or the `autopath` command). */
     this.autoPick = Object.create(null);
+    /**
+     * Fast-forward: how many sim ticks the client runs per real tick (one of
+     * GAME_SPEEDS). The sim itself never reads it (every tick is still 1/64 s,
+     * so the match plays out identically, only sooner); it lives here so co-op
+     * machines agree on the pace through the `speed` command. Survives restarts.
+     */
+    this.timeScale = 1;
     this.reset();
   }
 

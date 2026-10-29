@@ -10,7 +10,7 @@ import { FixedClock } from './fixed-clock.js';
 import { DEFAULT_LEVEL, LEVELS, levelCollision } from './level.js';
 import { PlayerController } from './player.js';
 import { defaultMoveConfig } from './sim/movement.js';
-import { Game, UpgradeError, defaultGameConfig } from './sim/game.js';
+import { Game, GAME_SPEEDS, UpgradeError, defaultGameConfig } from './sim/game.js';
 import { cowDebuts } from './sim/cows.js';
 import { TOWER_FORMS } from './sim/towers.js';
 import { applyCommand } from './sim/commands.js';
@@ -76,7 +76,10 @@ function startGame({ map, seed = newSeed(), session = null }) {
   const input = new Input(canvas, document.getElementById('touch'), player, cfg);
   const hud = new Hud(document.getElementById('hud'));
   const sfx = new Sfx();
+  // Two clocks: the farmer always moves in real time; the match (cows, towers)
+  // runs on its own clock so fast-forward speeds up the cows, not your legs.
   const clock = new FixedClock();
+  const simClock = new FixedClock();
   let announcedWave = 0;
 
   const nameOf = (p) => session?.players.find((q) => q.id === p)?.name ?? 'Someone';
@@ -135,6 +138,17 @@ function startGame({ map, seed = newSeed(), session = null }) {
   function toggleAuto() {
     autoAsked = !autoState();
     submit({ k: 'auto', on: autoAsked });
+  }
+
+  // Fast-forward: 1x -> 2x -> 3x -> 1x. A shared match setting (co-op machines
+  // must run ticks at the same pace), so it's a command like auto-upgrade.
+  let speedAsked = null;
+  const speedState = () => speedAsked ?? game.timeScale;
+  function cycleSpeed() {
+    const i = GAME_SPEEDS.indexOf(speedState());
+    speedAsked = GAME_SPEEDS[(i + 1) % GAME_SPEEDS.length];
+    submit({ k: 'speed', x: speedAsked });
+    if (menu.open) menu.refresh();
   }
 
   function toggleUpgrades() {
@@ -222,6 +236,12 @@ function startGame({ map, seed = newSeed(), session = null }) {
           : `${!mine && coop ? `${nameOf(c.p)} turned auto-upgrade OFF` : 'Auto-upgrade OFF'}`, 3000);
         if (menu.open) menu.refresh();
         break;
+      case 'speed':
+        if (mine && speedAsked === c.x) speedAsked = null;
+        sfx.play('select');
+        say(`${!mine && coop ? `${nameOf(c.p)} set the game speed to` : 'Game speed'} ${c.x}×${c.x > 1 ? ' ▶▶' : ''} · G to change`, 2000);
+        if (menu.open) menu.refresh();
+        break;
       case 'autopath':
         if (mine) sfx.play('select');
         if (upgrades.isOpen && mine) upgrades.flash(`Auto-upgrade will pick ${TOWER_FORMS[c.pick].name}`);
@@ -250,13 +270,14 @@ function startGame({ map, seed = newSeed(), session = null }) {
     sound: () => { sfx.toggleMute(); sfx.play('select'); },
     autoHop: () => { cfg.autoHop = !cfg.autoHop; input.touch.syncButtons(); },
     autoUpgrade: toggleAuto,
+    speed: cycleSpeed,
     sensDown: () => input.adjustSensitivity(-1),
     sensUp: () => input.adjustSensitivity(1),
     fullscreen: () => input.toggleFullscreen(),
     respawn: () => { player.pending.respawn = true; setPaused(false); },
     restart: () => { restartGame(); setPaused(false); },
     mainMenu: () => { session?.close(); toMainMenu(); },
-  }, () => ({ muted: sfx.muted, autoHop: cfg.autoHop, autoUpgrade: autoState(), sens: input.sensLabel }));
+  }, () => ({ muted: sfx.muted, autoHop: cfg.autoHop, autoUpgrade: autoState(), speed: speedState(), sens: input.sensLabel }));
   // iPhone Safari has no element fullscreen: don't offer a button that does nothing.
   if (!document.fullscreenEnabled) document.querySelector('[data-menu=fullscreen]').hidden = true;
   document.querySelector('[data-menu=coopNote]').hidden = !coop;
@@ -297,6 +318,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
     autoUpgrade: toggleAuto,
     sell: sellTower,
     nextWave: startWave,
+    fastForward: cycleSpeed,
     pause: () => setPaused(!paused),
     restart: () => { if (game.lost) restartGame(); },
     mute: () => {
@@ -361,10 +383,14 @@ function startGame({ map, seed = newSeed(), session = null }) {
         if (st.landedSpeed > 3) sfx.play('land', undefined, undefined, Math.min(st.landedSpeed / 14, 1));
       }
     }
-    const simTicks = sync.ticksToRun(ticks);
+    // The match clock is fed the same real time, `timeScale` times over: 2x runs
+    // two 1/64 s ticks where 1x runs one, so the result is identical, just sooner.
+    const scale = game.timeScale;
+    const simClockTicks = paused && !coop ? 0 : simClock.advance(frameDt, scale);
+    const simTicks = sync.ticksToRun(simClockTicks, scale);
     for (let i = 0; i < simTicks; i++) {
       for (const c of sync.beginTick()) onResult(c, applyCommand(game, c));
-      game.tick(clock.dt);
+      game.tick(simClock.dt);
       sync.endTick(game);
       td.consume(game.events); // tick() clears its events, so collect them every tick
       sfx.consume(game.events);
@@ -401,7 +427,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
     upgrades.update(game);
     input.touch.syncGame(game, build, upgrades.isOpen);
     renderer.setView(eye, player.yaw, player.pitch);
-    td.update(clock.alpha, frameDt, build); // culls against the view just set
+    td.update(simClock.alpha, frameDt, build); // culls against the view just set
     renderer.render();
     hud.update(now, frameDt, player, cfg, input, game, build);
     requestAnimationFrame(frame);

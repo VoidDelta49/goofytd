@@ -52,7 +52,10 @@ export function touchButtonState(game, build, upgradeOpen = false) {
   else upgrade = { sub: `LV ${look.def.level + 1} · ${TOWER_FORMS[look.def.upgrades[0]].upgradeCost}`, dim: false };
   // Wave 1 has its own big START button; a lost game has TRY AGAIN.
   const wave = { hidden: game.wave === 0 || game.lost };
-  return { place, sell, upgrade, wave };
+  // Fast-forward: always there, says the current speed, lit while above 1x.
+  const scale = game.timeScale ?? 1;
+  const ff = { label: `▶▶ ${scale}×`, on: scale > 1 };
+  return { place, sell, upgrade, wave, ff };
 }
 
 /**
@@ -192,6 +195,7 @@ export class TouchControls {
       case 'sell': this.input.handlers.sell?.(); break;
       case 'upgrade': this.input.handlers.upgrade?.(); break;
       case 'wave': this.input.handlers.nextWave?.(); break;
+      case 'ff': this.input.handlers.fastForward?.(); break;
       case 'pause': this.input.handlers.pause?.(); break;
     }
     this.syncButtons();
@@ -221,6 +225,14 @@ export class TouchControls {
       this.setFlag(b, 'on', !!v.on);
     }
     this.setFlag(this.buttons.wave, 'hidden', st.wave.hidden);
+    if (this.buttons.ff) {
+      this.setFlag(this.buttons.ff, 'on', st.ff.on);
+      if (this.shown['ff.label'] !== st.ff.label) {
+        this.shown['ff.label'] = st.ff.label;
+        const b = this.buttons.ff.querySelector('b');
+        if (b) b.textContent = st.ff.label;
+      }
+    }
   }
 
   setSub(name, text) {
