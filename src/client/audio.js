@@ -105,6 +105,46 @@ const SOUNDS = {
       v.noise(0.5, 0.25, 'highpass', [3000, 1200], 0.7, { delay: 0.05 });
     },
   },
+  // Wind-up telegraph: a Heifer snorts (two nasal noise puffs), a Spitter hawks up cud.
+  snort: {
+    gap: 0.15, max: 2, vol: 1.0,
+    build(v, p) {
+      v.noise(0.12, 0.6, 'bandpass', [700 * p, 400 * p], 1.5, { attack: 0.01 });
+      v.noise(0.16, 0.7, 'bandpass', [600 * p, 300 * p], 1.5, { attack: 0.01, delay: 0.16 });
+    },
+  },
+  hawk: {
+    gap: 0.15, max: 2, vol: 1.0,
+    build(v, p) {
+      v.noise(0.3, 0.5, 'bandpass', [1200 * p, 2600 * p], 3, { attack: 0.05 });
+      v.tone('sawtooth', [90 * p, 140 * p], 0.3, 0.2, { lowpass: [600, 900] });
+    },
+  },
+  // Headbutt landing on a tower: a wooden thunk and a cartoon boing.
+  bonk: {
+    gap: 0.06, max: 3, vol: 1.0,
+    build(v, p) {
+      v.tone('sine', [220 * p, 90], 0.14, 0.9);
+      v.noise(0.08, 0.6, 'lowpass', [1400, 300], 0.8);
+      v.tone('triangle', [330 * p, 660 * p, 440 * p], 0.3, 0.3, { delay: 0.04, vibrato: [14, 25] });
+    },
+  },
+  // Spit hitting a tower: ptoo, splat.
+  spit: {
+    gap: 0.08, max: 3, vol: 0.9,
+    build(v, p) {
+      v.noise(0.06, 0.5, 'highpass', [2000, 4000], 0.8);
+      v.noise(0.2, 0.6, 'bandpass', [900 * p, 300 * p], 2, { delay: 0.05 });
+    },
+  },
+  // A tower headbutted to bits: crunch and a falling tone.
+  wreck: {
+    gap: 0.2, max: 2, vol: 1.0,
+    build(v) {
+      v.noise(0.5, 0.8, 'lowpass', [3000, 200], 0.7, { attack: 0.005 });
+      v.tone('square', [400, 80], 0.5, 0.25, { lowpass: [1500, 300] });
+    },
+  },
   // A cow going down: a short surprised moo.
   kill: {
     gap: 0.06, max: 3, vol: 0.9,
@@ -422,6 +462,10 @@ export class Sfx {
         case 'kill': this.play('kill', e.x, e.z); break;
         case 'drink': this.play('drink', e.x, e.z); break;
         case 'boom': this.play('boom', e.x, e.z); break;
+        case 'windup': this.play(e.ram ? 'snort' : 'hawk', e.x, e.z); break;
+        case 'bonk': this.play('bonk', e.x, e.z); break;
+        case 'spit': this.play('spit', e.x1, e.z1); break;
+        case 'destroyed': if (e.cause === 'bonk') this.play('wreck', e.x, e.z); break;
         case 'wave': this.play('wave'); break;
         // Positioned when the surprise has a place (an ambush), so you can hear which way to look.
         case 'surprise': this.play('wave', e.x, e.z); break;

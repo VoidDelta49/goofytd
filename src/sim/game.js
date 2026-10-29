@@ -7,7 +7,7 @@ import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
 import { CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
-import { SELL_REFUND, TOWER_TYPES, TOWER_FORMS } from './towers.js';
+import { SELL_REFUND, WRECK_REFUND, REPAIR_DELAY, REPAIR_RATE, TOWER_TYPES, TOWER_FORMS, towerMaxHp } from './towers.js';
 import { mulberry32 } from './rng.js';
 import { SURPRISES, surpriseChance, pickSurprise } from './surprises.js';
 
@@ -72,6 +72,14 @@ export const UpgradeError = Object.freeze({
  */
 export const BLAST_TRIGGER = 1.0;
 
+/** A Headbutt Heifer goes for a tower this close (cow edge to tower edge): the same reach, for the same reason. */
+export const RAM_REACH = BLAST_TRIGGER;
+
+/** War Moo-st: seconds to roll in and to clear, and how much of their range towers lose at full fog. */
+export const FOG_IN = 3;
+export const FOG_OUT = 4;
+export const FOG_SIGHT_CUT = 0.35;
+
 export class Game {
   /**
    * @param {{blocks:{surface:string,aabb:Aabb}[], spawners?:{x:number,z:number}[]}} level
@@ -132,6 +140,10 @@ export class Game {
     /** Bounties × bountyMult while bountyTime > 0 (Happy Hour). */
     this.bountyMult = 1;
     this.bountyTime = 0;
+    /** War Moo-st: fogT s into a fog lasting fogDur s (0 = clear). Towers see sight × their range. */
+    this.fogT = 0;
+    this.fogDur = 0;
+    this.sight = 1;
   }
 
   /** HP multiplier for cows spawned this wave. */
@@ -332,6 +344,7 @@ export class Game {
     this.time += dt;
     this.updateSpawners(dt);
     if (this.bountyTime > 0 && (this.bountyTime -= dt) <= 0) this.bountyMult = 1;
+    this.updateFog(dt);
     this.updateCows(dt);
     this.updateHeals(dt);
     this.updateTowers(dt);
@@ -355,6 +368,13 @@ export class Game {
         this.milk -= type.damage;
         this.events.push({ kind: 'drink', x, z, id: cows.id[i] });
         cows.remove(i);
+        continue;
+      }
+      // Headbutt Heifers and Cud Spitters stand still while they wind up and hit.
+      if (type.windup > 0 && this.cowAbility(i, type, dt)) {
+        cows.px[i] = cows.x[i];
+        cows.pz[i] = cows.z[i];
+        if (cows.slowT[i] > 0) cows.slowT[i] -= dt;
         continue;
       }
       // Walkers follow the flow field; flyers go straight for the milk over everything.
@@ -417,6 +437,105 @@ export class Game {
     }
   }
 
+  /**
+   * Headbutt / spit for the cow at slot i. Returns true while it stands still
+   * (winding up, or on the tick it lets go). Holds tower ids, never cow slots,
+   * and never removes a cow, so it's safe in updateCows' backwards loop.
+   */
+  cowAbility(i, type, dt) {
+    const { cows } = this;
+    if (cows.slowT[i] > 0 && cows.slowF[i] === 0) {
+      // Tipped over: it can't do anything, and a wind-up is lost.
+      if (cows.abilS[i]) { cows.abilS[i] = 0; cows.abilT[i] = type.abilityCooldown * 0.5; }
+      return false;
+    }
+    if (cows.abilS[i] === 1) {
+      cows.abilT[i] -= dt;
+      if (cows.abilT[i] > 0) return true;
+      cows.abilS[i] = 0;
+      cows.abilT[i] = type.abilityCooldown;
+      const t = this.towers.get(cows.abilTower[i]);
+      if (!t) return true; // sold or wrecked mid wind-up: a whiff
+      const x = cows.x[i], z = cows.z[i];
+      if (type.ramDamage > 0) {
+        this.events.push({ kind: 'bonk', tower: t.id, x: t.x, z: t.z, cx: x, cz: z });
+        this.damageTower(t, type.ramDamage);
+      } else {
+        this.events.push({ kind: 'spit', tower: t.id, x0: x, z0: z, x1: t.x, y1: t.def.height * 0.8, z1: t.z });
+        t.stunT = Math.max(t.stunT, type.spitStun);
+        this.damageTower(t, type.spitDamage);
+      }
+      return true;
+    }
+    if (cows.abilT[i] > 0) { cows.abilT[i] -= dt; return false; }
+    const x = cows.x[i], z = cows.z[i];
+    const t = type.ramDamage > 0 ? this.towerAt(x, z, type.radius + RAM_REACH) : this.spitTarget(x, z, type.spitRange);
+    if (!t) return false;
+    cows.abilS[i] = 1;
+    cows.abilT[i] = type.windup;
+    cows.abilTower[i] = t.id;
+    // Face the tower (the renderer turns cows to their velocity) without moving.
+    const dx = t.x - x, dz = t.z - z, len = Math.sqrt(dx * dx + dz * dz) || 1;
+    cows.vx[i] = (dx / len) * 1e-3;
+    cows.vz[i] = (dz / len) * 1e-3;
+    this.events.push({ kind: 'windup', x, z, id: cows.id[i], tower: t.id, ram: type.ramDamage > 0 });
+    return true;
+  }
+
+  /** Nearest tower that shoots, isn't stunned, within `range` m of (x, z) (to its edge); ties go to the older tower. */
+  spitTarget(x, z, range) {
+    let best = null, bestD = range * range;
+    for (const t of this.towers.values()) {
+      if (!t.def.attack || t.stunT > 0) continue;
+      const d = boxDist2(t.aabb, x, z);
+      if (d <= bestD && (best === null || d < bestD)) { best = t; bestD = d; }
+    }
+    return best;
+  }
+
+  /** Knock `amount` HP off tower t; at 0 it's wrecked (WRECK_REFUND paid back). Returns true if it went. */
+  damageTower(t, amount) {
+    t.hp -= amount;
+    t.lastHit = this.time;
+    if (t.hp > 0) return false;
+    this.wreckTower(t);
+    return true;
+  }
+
+  wreckTower(t) {
+    this.removeTower(t);
+    this.grid.rebuild();
+    const refund = Math.floor(t.spent * WRECK_REFUND);
+    this.money += refund;
+    this.events.push({ kind: 'destroyed', tower: t.id, name: t.def.name, x: t.x, z: t.z, cause: 'bonk', refund });
+  }
+
+  /**
+   * War Moo-st: fog rolls in over FOG_IN s, sits, and clears over the last
+   * FOG_OUT s of `time`. Starting it again while it's up just makes it last
+   * longer from where it is now.
+   */
+  startFog(time) {
+    const level = this.fogLevel;
+    this.fogT = level * FOG_IN;
+    this.fogDur = this.fogT + Math.max(time, FOG_IN + FOG_OUT);
+  }
+
+  /** 0 (clear) .. 1 (thick). */
+  get fogLevel() {
+    if (this.fogDur <= 0) return 0;
+    const t = this.fogT, left = this.fogDur - t;
+    return Math.max(0, Math.min(1, t / FOG_IN, left / FOG_OUT));
+  }
+
+  updateFog(dt) {
+    if (this.fogDur > 0) {
+      this.fogT += dt;
+      if (this.fogT >= this.fogDur) this.fogT = this.fogDur = 0;
+    }
+    this.sight = 1 - FOG_SIGHT_CUT * this.fogLevel;
+  }
+
   /** Bounties are worth `mult` × for `time` s (a stronger running boost isn't cut short). */
   boostBounty(mult, time) {
     if (this.bountyTime > 0 && this.bountyMult > mult) return;
@@ -442,16 +561,24 @@ export class Game {
    * Looks only at the towers in the 5x5 cells around the point (reach must stay under 2 cells).
    */
   towerNear(x, z, reach) {
+    return this.towerAt(x, z, reach) !== null;
+  }
+
+  /** The nearest tower whose footprint is within `reach` m of (x, z), or null. Same 5x5-cell limit as towerNear. */
+  towerAt(x, z, reach) {
     const { grid } = this;
     const cx = grid.cellX(x), cz = grid.cellZ(z);
+    let best = null, bestD = reach * reach;
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
         if (!grid.inBounds(cx + dx, cz + dz)) continue;
         const id = grid.tower[grid.index(cx + dx, cz + dz)];
-        if (id && boxDist2(this.towers.get(id).aabb, x, z) <= reach * reach) return true;
+        if (!id) continue;
+        const t = this.towers.get(id), d = boxDist2(t.aabb, x, z);
+        if (d <= bestD && (best === null || d < bestD || (d === bestD && id < best.id))) { best = t; bestD = d; }
       }
     }
-    return false;
+    return best;
   }
 
   /**
@@ -475,7 +602,16 @@ export class Game {
   updateTowers(dt) {
     for (const t of this.towers.values()) {
       const def = t.def;
+      // Dents patch themselves up once the headbutting stops.
+      if (t.hp < t.maxHp && this.time - t.lastHit >= REPAIR_DELAY) t.hp = Math.min(t.maxHp, t.hp + REPAIR_RATE * t.maxHp * dt);
       if (!def.attack) continue;
+      if (t.stunT > 0) {
+        // Gummed up with cud: no shots, the barrels spin down, and the cooldown doesn't bank shots.
+        t.stunT -= dt;
+        t.cooldown = Math.max(0, t.cooldown - dt);
+        if (def.spinDown > 0) t.charge = Math.max(0, t.charge - def.spinDown * dt);
+        continue;
+      }
       t.cooldown -= dt;
       if (t.cooldown > 0) continue;
       const target = def.targeting(this, t);
@@ -688,6 +824,7 @@ export class Game {
       id, def: p.type, x: p.x, z: p.z, cx: p.cx, cz: p.cz, cells: p.cells, aabb: p.aabb,
       cooldown: 0, charge: 0, kills: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
       spent: p.type.cost,
+      hp: towerMaxHp(p.type), maxHp: towerMaxHp(p.type), lastHit: -Infinity, stunT: 0,
     };
     this.aimAt(t, t.x, t.z - 1);
     for (const i of p.cells) this.grid.tower[i] = id;
@@ -714,6 +851,8 @@ export class Game {
     this.money -= next.upgradeCost;
     t.spent += next.upgradeCost;
     t.def = next;
+    // A fresh coat of paint: upgrading also fully repairs it.
+    t.hp = t.maxHp = towerMaxHp(next);
     t.charge = 0;
     t.cooldown = Math.min(t.cooldown, next.interval);
     this.aimAt(t, t.x + t.aimX, t.z + t.aimZ); // the muzzle may have moved

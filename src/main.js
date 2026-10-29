@@ -223,6 +223,7 @@ function frame(now) {
     for (const e of game.events) {
       if (e.kind === 'surprise') say(e.text, 3500);
       if (e.kind === 'boom' && e.wrecked) say(`KABOOM! A Kaboom Cow blew up ${e.wrecked === 1 ? 'a tower' : `${e.wrecked} towers`}`, 2500);
+      if (e.kind === 'destroyed' && e.cause === 'bonk') say(`BONK! Your ${e.name} got headbutted to bits (+${e.refund} moolah insurance)`, 2500);
     }
   }
   // Announce new cow types the first time a wave brings them (auto or by hand).

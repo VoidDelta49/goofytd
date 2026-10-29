@@ -14,6 +14,12 @@ const MAX_PUFFS = 96;
 const MAX_ZONES = 64;
 /** Seconds an upgraded tower takes to settle from its pop. */
 const POP_TIME = 0.45;
+/** Seconds a headbutted tower wobbles. */
+const BONK_TIME = 0.35;
+/** War Moo-st: fog near/far (m) and colour at full thickness. */
+const MIST_NEAR = 6;
+const MIST_FAR = 34;
+const MIST_COLOR = 0xc8ced3;
 
 export class TdRenderer {
   /** @param {THREE.Scene} scene @param {import('../sim/game.js').Game} game */
@@ -87,7 +93,21 @@ export class TdRenderer {
     this.puffGeo = new THREE.SphereGeometry(1, 12, 8);
     this.puffPool = [];
     this.tmp = new THREE.Object3D();
+    // Yaw, then pitch, then roll: so a Heifer's lean back is about its own sideways axis.
+    this.tmp.rotation.order = 'YXZ';
     this.tmpColor = new THREE.Color();
+    this.spitGlow = new THREE.Color(0.55, 1, 0.3);
+
+    // Tower HP bars: a dark back and a coloured fill, shown only on damaged towers.
+    this.barGeo = new THREE.BoxGeometry(1, 0.14, 0.14);
+    this.barBack = new THREE.MeshBasicMaterial({ color: 0x222222 });
+    // Spit goo on a jammed tower.
+    this.gooMat = new THREE.MeshStandardMaterial({ color: 0x8fd14f, roughness: 0.3, emissive: 0x2a5a10 });
+
+    // War Moo-st: remember the clear-weather fog so we can blend back to it.
+    this.mistColor = new THREE.Color(MIST_COLOR);
+    this.clearFog = scene.fog ? { near: scene.fog.near, far: scene.fog.far, color: scene.fog.color.clone() } : null;
+    this.clearSky = scene.background?.isColor ? scene.background.clone() : null;
   }
 
   material(color, ghost = false) {
@@ -174,6 +194,13 @@ export class TdRenderer {
         this.puff(e.x, 1.4, e.z, e.radius * 0.8, 0xffe066);
       } else if (e.kind === 'destroyed') {
         this.puff(e.x, 0.8, e.z, 1.6, 0x6b5a46);
+      } else if (e.kind === 'bonk') {
+        const view = this.towerViews.get(e.tower);
+        if (view) view.userData.bonk = BONK_TIME;
+        this.puff((e.x + e.cx) / 2, 0.7, (e.z + e.cz) / 2, 0.7, 0xfff3c0);
+      } else if (e.kind === 'spit') {
+        if (this.tracers.length < MAX_TRACERS) this.tracers.push({ x0: e.x0, y0: 1.1, z0: e.z0, x1: e.x1, y1: e.y1, z1: e.z1, color: 0x8fd14f, age: 0 });
+        this.puff(e.x1, e.y1, e.z1, 0.8, 0x8fd14f);
       }
     }
   }
@@ -211,6 +238,20 @@ export class TdRenderer {
     this.syncShells(alpha);
     this.syncZones();
     this.syncPuffs(frameDt);
+    this.syncFog();
+  }
+
+  /** Blend the scene fog and sky toward the War Moo-st as game.fogLevel rises. */
+  syncFog() {
+    const fog = this.scene.fog, c = this.clearFog;
+    if (!fog || !c) return;
+    const k = this.game.fogLevel;
+    // Ease in, so the view closes in quickly once it starts.
+    const e = 1 - (1 - k) * (1 - k);
+    fog.near = c.near + (MIST_NEAR - c.near) * e;
+    fog.far = c.far + (MIST_FAR - c.far) * e;
+    fog.color.copy(c.color).lerp(this.mistColor, e);
+    if (this.clearSky) this.scene.background.copy(this.clearSky).lerp(this.mistColor, e);
   }
 
   syncCows(alpha) {
@@ -231,6 +272,17 @@ export class TdRenderer {
         // Tipped over: lying on its side, legs in the air, until it gets up.
         o.position.set(x, 0.45 * type.scale, z);
         o.rotation.set(0, (c.id[i] * 2.39) % (2 * Math.PI), Math.PI / 2);
+      } else if (c.abilS[i] === 1) {
+        // Winding up: a Heifer rears back (nose up, shaking); a Spitter puffs its cheeks.
+        const k = 1 - Math.max(0, c.abilT[i]) / type.windup;
+        const heading = Math.atan2(-c.vx[i], -c.vz[i]);
+        if (type.ramDamage > 0) {
+          o.position.set(x, 0.1 * k, z);
+          o.rotation.set(0.45 * k, heading, Math.sin(ph * 3) * 0.08 * k);
+        } else {
+          o.position.set(x, 0, z);
+          o.rotation.set(-0.15 * k, heading, 0);
+        }
       } else {
         // Waddle: bob and roll a little, out of phase per cow. Enraged bulls shake.
         const mad = type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i];
@@ -239,7 +291,7 @@ export class TdRenderer {
         // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
         o.rotation.set(0, Math.atan2(-c.vx[i], -c.vz[i]), Math.sin(mad ? ph * 2.5 : ph) * rock);
       }
-      o.scale.setScalar(type.scale);
+      o.scale.setScalar(type.scale * (c.abilS[i] === 1 && type.spitRange > 0 ? 1 + 0.2 * (1 - Math.max(0, c.abilT[i]) / type.windup) : 1));
       o.updateMatrix();
       m.setMatrixAt(i, o.matrix);
       if (type.altitude > 0 && wings + 2 <= this.wingMesh.instanceMatrix.count) {
@@ -257,6 +309,7 @@ export class TdRenderer {
       if (type.healRate > 0) col.lerp(this.healGlow, 0.25 + 0.25 * Math.sin(this.time * 6 + c.id[i]));
       if (type.camo > 0) col.multiplyScalar(0.55 + 0.25 * Math.sin(this.time * 3 + c.id[i])); // shimmer in and out
       if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
+      if (c.abilS[i] === 1 && type.spitRange > 0) col.lerp(this.spitGlow, 0.5 + 0.3 * Math.sin(this.time * 20));
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       m.setColorAt(i, col);
     }
@@ -291,7 +344,28 @@ export class TdRenderer {
         view.scale.set(1 - 0.18 * Math.sin(s * Math.PI), 1 + 0.35 * Math.sin(s * Math.PI), 1 - 0.18 * Math.sin(s * Math.PI));
       }
       view.userData.aim.rotation.y = Math.atan2(-t.aimX, -t.aimZ);
+      // Headbutted: a quick wobble. Jammed with cud: goo on top and the gun droops.
+      const b = view.userData.bonk ?? 0;
+      if (b > 0) view.userData.bonk = Math.max(0, b - this.frameDt);
+      view.rotation.z = b > 0 ? Math.sin(b * 60) * 0.12 * (b / BONK_TIME) : 0;
+      const jammed = t.stunT > 0;
+      view.userData.goo.visible = jammed;
+      view.userData.aim.rotation.x = jammed ? -0.25 + Math.sin(this.time * 4) * 0.05 : 0;
+      this.syncHpBar(view, t);
     }
+  }
+
+  syncHpBar(view, t) {
+    const bar = view.userData.bar;
+    const f = t.hp / t.maxHp;
+    bar.visible = f < 0.999;
+    if (!bar.visible) return;
+    const fill = view.userData.barFill;
+    fill.scale.x = Math.max(0.001, f);
+    fill.position.x = -(1 - f) * 0.5; // unit space; the wrapper stretches it to 1.4 m
+    fill.material.color.setRGB(f < 0.5 ? 1 : 2 * (1 - f), f < 0.5 ? 2 * f : 1, 0.15);
+    // Undo the bonk wobble so the bar stays level.
+    bar.rotation.z = -view.rotation.z;
   }
 
   newTowerView(t, pop) {
@@ -299,6 +373,30 @@ export class TdRenderer {
     view.position.set(t.x, 0, t.z);
     view.userData.def = t.def;
     view.userData.pop = pop;
+    view.userData.bonk = 0;
+    // HP bar floating over the tower (1.4 m wide).
+    const bar = new THREE.Group();
+    bar.position.y = t.def.height + 0.6;
+    const back = new THREE.Mesh(this.barGeo, this.barBack);
+    back.scale.set(1.5, 1, 0.9);
+    const fill = new THREE.Mesh(this.barGeo, new THREE.MeshBasicMaterial({ color: 0x44ff44 }));
+    // The fill box is 1 m wide in a wrapper stretched to 1.4 m; syncHpBar shrinks it from the right.
+    const fillWrap = new THREE.Group();
+    fillWrap.scale.x = 1.4;
+    fill.scale.set(1, 1.2, 1);
+    fillWrap.add(fill);
+    bar.add(back, fillWrap);
+    bar.visible = false;
+    view.add(bar);
+    view.userData.bar = bar;
+    view.userData.barFill = fill;
+    // Cud goo blob for a jammed tower.
+    const goo = new THREE.Mesh(this.puffGeo, this.gooMat);
+    goo.scale.set(0.45 * t.def.footprint, 0.25, 0.45 * t.def.footprint);
+    goo.position.y = t.def.height;
+    goo.visible = false;
+    view.add(goo);
+    view.userData.goo = goo;
     this.scene.add(view);
     this.towerViews.set(t.id, view);
     return view;

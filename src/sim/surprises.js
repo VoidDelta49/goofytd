@@ -209,3 +209,35 @@ defineSurprise({
     { at: 0, spawn: 'ninja', count: 3 + Math.floor(wave / 2), every: 0.3, from: 'flank', announce: '...wait, were those NINJA COWS?' },
   ],
 });
+
+defineSurprise({
+  id: 'warmoost', name: 'War Moo-st', firstWave: 6, weight: 2, delay: [3, 10],
+  // Fog: towers see 35% less far and you see much less. Fair warning first, a
+  // hidden group whose horn tells you which way to look, and kills pay 1.5×
+  // while it lasts.
+  script: ({ wave }) => [
+    { at: 0, say: "Is it just me, or is it getting MOO-STY out here? (Fog incoming: kills pay 1.5×)" },
+    { at: 3, call: (game) => { game.startFog(22); game.boostBounty(1.5, 22); } },
+    {
+      at: 9, spawn: 'cow', mix: true, count: 3 + Math.floor(wave / 2), every: 0.5, from: 'flank',
+      announce: 'Something is mooing out there in the mist...',
+    },
+  ],
+});
+
+defineSurprise({
+  id: 'demolition', name: 'Demolition Crew', firstWave: 7, weight: 2, delay: [3, 10],
+  script: ({ wave }) => [
+    { at: 0, say: 'DEMOLITION CREW! Headbutt Heifers are after your towers. Hay bales by the lane soak the bonks!' },
+    { at: 1, spawn: 'ram', count: 2 + Math.floor(wave / 4), every: 0.6, from: 'random' },
+  ],
+});
+
+defineSurprise({
+  id: 'spittake', name: 'Spit Take', firstWave: 9, weight: 2, delay: [3, 10],
+  script: ({ wave }) => [
+    { at: 0, say: 'CUD SPITTERS! Green goo jams a tower for a few seconds. Gross, but not fatal.' },
+    { at: 1, spawn: 'spitter', count: 2 + Math.floor(wave / 5), every: 0.7, from: 'random' },
+    { at: 1.5, spawn: 'cow', mix: true, count: 4 + Math.floor(wave / 3), every: 0.3, from: 'same' },
+  ],
+});

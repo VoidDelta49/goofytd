@@ -14,8 +14,8 @@ import { COW_TYPE_LIST } from './cows.js';
 
 /**
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
- * [minRange, range] of the tower centre (in XZ) count, and a camo cow only
- * within its `camo` metres.
+ * [minRange, range × game.sight] of the tower centre (in XZ) count (sight < 1
+ * in War Moo-st fog), and a camo cow only within its `camo` metres.
  */
 export const TARGETING = {
   /** Furthest along the path: the cow with the shortest walk left to the milk. */
@@ -38,7 +38,8 @@ function dist2(cows, i, x, z) {
 function pick(game, t, score) {
   const { cows } = game;
   const def = t.def;
-  const r2 = def.range * def.range, m2 = def.minRange * def.minRange;
+  const range = def.range * (game.sight ?? 1);
+  const r2 = range * range, m2 = def.minRange * def.minRange;
   let best = -1, bestScore = -Infinity;
   for (let i = 0; i < cows.count; i++) {
     const type = COW_TYPE_LIST[cows.type[i]];
@@ -184,6 +185,8 @@ function resolve(def) {
  *   slow, slowTime        'aura': speed factor and how long it lasts
  *   slick                 'lob': { radius, time, dps, slow } puddle where the shell lands
  *   blastProof            Kaboom Cows can't wreck it
+ *   hp                    toughness against Headbutt Heifers (and spit); each upgrade
+ *                         level adds 25% (towerMaxHp). Default 60
  *   groundFactor          'lob': damage multiplier on walkers (flak is made for flyers)
  *   muzzle                [x, y, z] local point shots leave from; rotates with the aim
  *   parts                 boxes to draw: { min:[x,y,z], max:[x,y,z], color, aim?:true }
@@ -198,7 +201,7 @@ export function defineTower(def) {
   const t = Object.freeze({
     blurb: '', range: 0, minRange: 0, hitsAir: true, interval: 1, damage: 0, muzzle: [0, 1, 0], shotColor: 0xffffff,
     minInterval: 0, spinUp: 0, spinDown: 0, maxHits: 1, spreadCos: 1, slow: 1, slowTime: 0, slick: null,
-    blastProof: false, groundFactor: 1, accent: 0xffd84d, shotSound: 'shot',
+    blastProof: false, groundFactor: 1, accent: 0xffd84d, shotSound: 'shot', hp: 60,
     ...def, ...fns,
     level: 1, root: def.id, from: null, kind: 'base', upgradeCost: 0, upgrades: [],
   });
@@ -238,6 +241,15 @@ export function defineUpgrade(def) {
 }
 
 export const SELL_REFUND = 0.7;
+/** A tower headbutted to pieces pays back this much of what was spent on it (insurance; Kaboom pays nothing). */
+export const WRECK_REFUND = 0.35;
+/** Damaged towers start patching themselves up this many seconds after the last hit... */
+export const REPAIR_DELAY = 4;
+/** ...at this fraction of their max HP per second. */
+export const REPAIR_RATE = 0.1;
+
+/** Max HP of a tower form: its `hp`, +25% per upgrade level, so investing in a tower also toughens it. */
+export function towerMaxHp(def) { return Math.round(def.hp * (1 + 0.25 * (def.level - 1))); }
 
 /** Deepest level any form of this root type reaches (for the HUD's level pips). */
 export function maxLevel(rootId) {
@@ -284,6 +296,7 @@ export function towerStats(def) {
   }
   if (def.attack) add('air', 'hits flyers', def.hitsAir ? 1 : 0, def.hitsAir ? 'yes' : 'no');
   if (def.blastProof) add('blast', 'Kaboom-proof', 1, 'yes');
+  add('hp', 'toughness', towerMaxHp(def));
   return rows;
 }
 
@@ -397,6 +410,7 @@ const MORTAR_BASE = [{ min: [-1.8, 0, -1.8], max: [1.8, 1.0, 1.8], color: 0x8a6a
 
 defineTower({
   id: 'mortar',
+  hp: 100,
   name: 'Butter Mortar',
   blurb: 'slow lobbed splash, can\'t hit up close or flying cows',
   cost: 120,
@@ -507,6 +521,8 @@ defineTower({
   footprint: 1,
   height: 1.0,
   attack: null,
+  // Walls soak headbutts: cheap bales beside the lane keep Heifers off the guns.
+  hp: 160,
   accent: 0xe2c25a,
   parts: BALE(0xa8873a),
 });
@@ -514,7 +530,7 @@ defineTower({
 defineUpgrade({
   id: 'haybale2', from: 'haybale', kind: 'buff', cost: 20,
   name: 'Packed Bale', blurb: 'iron-strapped: Kaboom Cows blow up on it and it just shrugs',
-  blastProof: true, accent: 0xb9c0cc,
+  blastProof: true, hp: 200, accent: 0xb9c0cc,
   parts: BALE(0x5a5f6a),
 });
 

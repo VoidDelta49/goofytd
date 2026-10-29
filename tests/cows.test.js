@@ -28,12 +28,13 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
   assert(waveMix(1).length === 1 && waveMix(2).length === 1 && waveMix(1)[0].type === COW_TYPES.cow, 'early waves not plain');
   // Weight-0 types (Cash Cow, Big Bessie, Calf) are surprise-only and never in a mix.
   const waveTypes = COW_TYPE_LIST.filter((t) => t.weight > 0).length;
-  assert(waveTypes === 10 && waveMix(11).length === waveTypes, 'wave 11 should have every wave type');
+  assert(waveTypes === 12 && waveMix(13).length === waveTypes, 'wave 13 should have every wave type');
   assert(waveMix(6).length === 5 && waveMix(10).length === 9, 'one new type per wave from 7 to 11');
   assert(cowDebuts(1).length === 0, 'wave 1 announces the plain cow');
-  const debuted = [3, 4, 5, 6, 7, 8, 9, 10, 11].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
-  assert(debuted === 'big,boomer,bull,fast,flying,mama,ninja,tin,vet', `debuts: ${debuted}`);
-  const mix = waveMix(11);
+  const debuted = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
+  assert(debuted === 'big,boomer,bull,fast,flying,mama,ninja,ram,spitter,tin,vet', `debuts: ${debuted}`);
+  for (let w = 3; w <= 13; w++) assert(cowDebuts(w).length === 1, `wave ${w}: ${cowDebuts(w).length} debuts`);
+  const mix = waveMix(13);
   const counts = new Map();
   for (let k = 0; k < 1000; k++) {
     const t = pickFromMix(mix, k / 1000);
@@ -57,7 +58,7 @@ test('cows: spawners use the mix (wave 1 plain, wave 11 everything) with per-wav
   const w1 = seen.filter((s) => s.wave === 1);
   assert(w1.length === 40 && w1.every((s) => s.id === 'cow' && s.hp === COW_TYPES.cow.hp), 'wave 1 not 40 plain cows');
   const w11 = new Set(seen.filter((s) => s.wave === 11).map((s) => s.id));
-  assert(w11.size === COW_TYPE_LIST.filter((t) => t.weight > 0).length, `wave 11 types: ${[...w11]}`);
+  assert(w11.size === COW_TYPE_LIST.filter((t) => t.weight > 0 && t.firstWave <= 11).length, `wave 11 types: ${[...w11]}`);
   const big11 = seen.find((s) => s.wave === 11 && s.id === 'big');
   assert(Math.abs(big11.hp - COW_TYPES.big.hp * (1 + 0.15 * 10)) < 1e-9, `big cow hp ${big11.hp}`);
 });

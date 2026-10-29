@@ -23,6 +23,15 @@
  *                get healRate × HEAL_PULSE of their max HP back
  *   camo         towers can't pick it as a target until it's within this many
  *                metres (splash, spray and auras still hit it)
+ *   ramDamage    > 0: a Headbutt Heifer. When a tower is within RAM_REACH of
+ *                its edge it stops, winds up for `windup` s (a 'windup' event:
+ *                snort, lean back) and headbutts it for ramDamage tower HP.
+ *                Then it can't again for `abilityCooldown` s
+ *   spitRange, spitStun, spitDamage   a Cud Spitter: stops, winds up, and spits
+ *                at the nearest shooting tower within spitRange m that isn't
+ *                already stunned: it can't fire for spitStun s (never stacks)
+ *   windup, abilityCooldown   for both of the above. A tipped cow can't act,
+ *                and tipping it mid wind-up cancels the attack
  *   firstWave, weight   when it starts showing up in waves, and how often
  *                relative to the others (see waveMix)
  */
@@ -38,11 +47,15 @@ export function defineCow(def) {
     if (def[k] === undefined) throw new Error(`cow type ${def.id}: missing ${k}`);
   }
   if (def.splitInto && !(def.splitCount > 0)) throw new Error(`cow type ${def.id}: splitInto needs splitCount`);
+  if ((def.ramDamage > 0 || def.spitRange > 0) && !(def.windup > 0 && def.abilityCooldown > 0)) {
+    throw new Error(`cow type ${def.id}: an attack needs windup and abilityCooldown`);
+  }
   if (COW_TYPES[def.id]) throw new Error(`cow type ${def.id} defined twice`);
   if (COW_TYPE_LIST.length >= 256) throw new Error('too many cow types (stored as a byte)');
   const t = Object.freeze({
     name: def.id, scale: 1, color: 0xffffff, altitude: 0, blastRadius: 0, firstWave: 1, weight: 1,
     armor: 0, splitInto: null, splitCount: 0, enrageBelow: 0, enrageSpeed: 1, healRate: 0, healRadius: 0, camo: 0,
+    ramDamage: 0, spitRange: 0, spitStun: 0, spitDamage: 0, windup: 0, abilityCooldown: 0,
     ...def, index: COW_TYPE_LIST.length,
   });
   COW_TYPES[def.id] = t;
@@ -122,6 +135,19 @@ defineCow({
   camo: 7, firstWave: 11, weight: 1,
 });
 
+// Cows that hit back. Both stand still while they wind up, so they're free shots,
+// and both are easy to read: a snort and a lean back, or a puffed-up green spitter.
+
+defineCow({
+  id: 'ram', name: 'Headbutt Heifer', hp: 80, speed: 2.8, bounty: 11, damage: 8, radius: 0.6, scale: 1.15, color: 0x8a6a5a,
+  ramDamage: 20, windup: 0.9, abilityCooldown: 2.2, firstWave: 12, weight: 2,
+});
+
+defineCow({
+  id: 'spitter', name: 'Cud Spitter', hp: 40, speed: 3.0, bounty: 9, damage: 5, radius: 0.55, scale: 1, color: 0x9ad36a,
+  spitRange: 9, spitStun: 2.5, spitDamage: 5, windup: 0.7, abilityCooldown: 5, firstWave: 13, weight: 1,
+});
+
 // Surprise-only cows (weight 0: never in a wave mix; surprises.js spawns them).
 
 defineCow({
@@ -184,8 +210,13 @@ export class CowPool {
     /** Slowed (molasses, butter slick, glue): speed × slowF for slowT more seconds. */
     this.slowT = new Float64Array(capacity);
     this.slowF = new Float64Array(capacity);
+    /** Headbutt / spit: abilS 1 = winding up for abilT more s at tower abilTower; 0 = abilT s of cooldown left. */
+    this.abilT = new Float64Array(capacity);
+    this.abilS = new Uint8Array(capacity);
+    /** A tower id, never a slot (towers can be sold or wrecked mid wind-up). */
+    this.abilTower = new Uint32Array(capacity);
     this.nextId = 1;
-    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF];
+    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF, this.abilT, this.abilS, this.abilTower];
   }
 
   /** Returns the slot, or -1 when full. */
@@ -203,6 +234,10 @@ export class CowPool {
     this.id[i] = this.nextId++;
     this.slowT[i] = 0;
     this.slowF[i] = 1;
+    // Spitters wait a moment after spawning, so they don't all fire the second they walk in.
+    this.abilT[i] = type.spitRange > 0 ? type.abilityCooldown * 0.4 : 0;
+    this.abilS[i] = 0;
+    this.abilTower[i] = 0;
     return i;
   }
 
