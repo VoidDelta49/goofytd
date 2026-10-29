@@ -1,5 +1,5 @@
 // Player actions as plain data. Every change a player makes to the match
-// (build, sell, upgrade, start a wave, restart) is a command applied at the
+// (build, sell, upgrade, auto-upgrade settings, start a wave, restart) is a command applied at the
 // start of a tick, in the same order on every machine. Singleplayer goes
 // through the same path, so co-op can't drift from what solo players test.
 // Pure: no DOM, no three.js. Commands arrive over the network, so they're
@@ -33,6 +33,13 @@ export function sanitizeCommand(c) {
       return Number.isInteger(c.n) && c.n >= 1 && c.n <= MAX_PLAYERS ? { k: 'players', n: c.n } : null;
     case 'surprise':
       return typeof c.id === 'string' && Object.hasOwn(SURPRISES, c.id) ? { k: 'surprise', id: c.id } : null;
+    case 'auto':
+      return typeof c.on === 'boolean' ? { k: 'auto', on: c.on } : null;
+    case 'autopath': {
+      // Only a real path choice, and only one of its own variants.
+      const f = typeof c.form === 'string' && Object.hasOwn(TOWER_FORMS, c.form) ? TOWER_FORMS[c.form] : null;
+      return f && f.upgrades.length > 1 && f.upgrades.includes(c.pick) ? { k: 'autopath', form: c.form, pick: c.pick } : null;
+    }
     default:
       return null;
   }
@@ -76,6 +83,12 @@ export function applyCommand(game, c) {
       return { ok: true };
     case 'surprise':
       return { ok: game.queueSurprise(c.id) !== false };
+    case 'auto':
+      game.autoUpgrade = c.on;
+      return { ok: true, on: c.on };
+    case 'autopath':
+      game.autoPick[c.form] = c.pick;
+      return { ok: true, form: c.form, pick: c.pick };
     default:
       return { ok: false };
   }
@@ -94,7 +107,7 @@ export function stateHash(game) {
     h = Math.imul(h ^ u[0], 0x01000193);
     h = Math.imul(h ^ u[1], 0x01000193);
   };
-  mix(game.money); mix(game.milk); mix(game.wave); mix(game.kills); mix(game.cows.count); mix(game.towers.size);
+  mix(game.money); mix(game.milk); mix(game.wave); mix(game.kills); mix(game.cows.count); mix(game.towers.size); mix(game.autoUpgrade ? 1 : 0);
   const c = game.cows;
   for (let i = 0; i < c.count; i++) { mix(c.x[i]); mix(c.z[i]); mix(c.hp[i]); mix(c.id[i]); }
   for (const t of game.towers.values()) { mix(t.id); mix(t.hp); mix(t.cooldown); }

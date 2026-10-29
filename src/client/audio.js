@@ -664,6 +664,8 @@ export class Sfx {
         case 'kill': this.play('kill', e.x, e.z); if (e.mult > 1) this.play('cash', e.x, e.z); break;
         case 'spray': this.play(e.sound ?? 'hiss', e.x0, e.z0); break;
         case 'interest': this.play('cash'); break;
+        // Auto-upgrades (bought ones are cleared before this and sound from main.js).
+        case 'upgraded': this.play('upgrade', e.x, e.z); break;
         case 'drink': this.play('drink', e.x, e.z); break;
         case 'boom': this.play('boom', e.x, e.z); break;
         case 'windup': this.play(e.ram ? 'snort' : 'hawk', e.x, e.z); break;

@@ -117,7 +117,25 @@ function startGame({ map, seed = newSeed(), session = null }) {
       closeUpgrades();
     },
     close: closeUpgrades,
+    toggleAuto,
+    autoPath: (formId) => {
+      const t = upgrades.tower;
+      if (t) submit({ k: 'autopath', form: t.def.id, pick: formId });
+    },
   });
+
+  // Auto-upgrade: towers buy their own next level (cheapest first, along each
+  // tower's remembered path). A shared match setting, so it goes through a command;
+  // your choice is remembered and turned back on when you next host or play solo.
+  const AUTO_KEY = 'goofytd.autoUpgrade';
+  // What this farmer last asked for, until the command runs (solo pause stops ticks,
+  // so a toggle in the pause menu only applies on resume; the label shows the ask).
+  let autoAsked = null;
+  const autoState = () => autoAsked ?? game.autoUpgrade;
+  function toggleAuto() {
+    autoAsked = !autoState();
+    submit({ k: 'auto', on: autoAsked });
+  }
 
   function toggleUpgrades() {
     if (upgrades.isOpen) { closeUpgrades(); return; }
@@ -193,6 +211,21 @@ function startGame({ map, seed = newSeed(), session = null }) {
         if (!mine && coop) say(`${nameOf(c.p)} started wave ${r.wave}!`, 2000);
         if (r.interest > 0) { sfx.play('cash'); say(`Cheese Vault interest: +${r.interest} moolah`, 2500); }
         break;
+      case 'auto':
+        if (mine) {
+          if (autoAsked === c.on) autoAsked = null;
+          try { localStorage.setItem(AUTO_KEY, c.on ? '1' : '0'); } catch {}
+        }
+        sfx.play('select');
+        say(c.on
+          ? `${!mine && coop ? `${nameOf(c.p)} turned auto-upgrade ON` : 'Auto-upgrade ON'}: towers buy their next level when you can afford it · T to stop`
+          : `${!mine && coop ? `${nameOf(c.p)} turned auto-upgrade OFF` : 'Auto-upgrade OFF'}`, 3000);
+        if (menu.open) menu.refresh();
+        break;
+      case 'autopath':
+        if (mine) sfx.play('select');
+        if (upgrades.isOpen && mine) upgrades.flash(`Auto-upgrade will pick ${TOWER_FORMS[c.pick].name}`);
+        break;
       case 'reset':
         build.cancel();
         upgrades.close();
@@ -216,13 +249,14 @@ function startGame({ map, seed = newSeed(), session = null }) {
     },
     sound: () => { sfx.toggleMute(); sfx.play('select'); },
     autoHop: () => { cfg.autoHop = !cfg.autoHop; input.touch.syncButtons(); },
+    autoUpgrade: toggleAuto,
     sensDown: () => input.adjustSensitivity(-1),
     sensUp: () => input.adjustSensitivity(1),
     fullscreen: () => input.toggleFullscreen(),
     respawn: () => { player.pending.respawn = true; setPaused(false); },
     restart: () => { restartGame(); setPaused(false); },
     mainMenu: () => { session?.close(); toMainMenu(); },
-  }, () => ({ muted: sfx.muted, autoHop: cfg.autoHop, sens: input.sensLabel }));
+  }, () => ({ muted: sfx.muted, autoHop: cfg.autoHop, autoUpgrade: autoState(), sens: input.sensLabel }));
   // iPhone Safari has no element fullscreen: don't offer a button that does nothing.
   if (!document.fullscreenEnabled) document.querySelector('[data-menu=fullscreen]').hidden = true;
   document.querySelector('[data-menu=coopNote]').hidden = !coop;
@@ -260,6 +294,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
     },
     place: () => { if (!upgrades.isOpen) placeTower(); }, // a click with the panel open does nothing
     upgrade: toggleUpgrades,
+    autoUpgrade: toggleAuto,
     sell: sellTower,
     nextWave: startWave,
     pause: () => setPaused(!paused),
@@ -290,6 +325,9 @@ function startGame({ map, seed = newSeed(), session = null }) {
     if (upgrades.isOpen) closeUpgrades(); // picking a tower to build means you're done upgrading
     input.handlers.selectTower(Number(slot.dataset.n));
   });
+
+  // Bring back the farmer's auto-upgrade choice (the host's decides for a co-op match).
+  try { if (isHost && localStorage.getItem(AUTO_KEY) === '1') submit({ k: 'auto', on: true }); } catch {}
 
   if (session) {
     session.onEvent = (e) => {

@@ -84,6 +84,9 @@ export const FOG_IN = 3;
 export const FOG_OUT = 4;
 export const FOG_SIGHT_CUT = 0.35;
 
+/** Auto-upgrade: seconds between automatic buys, so each one gets its own pop and sound. */
+export const AUTO_EVERY = 0.4;
+
 export class Game {
   /**
    * @param {{blocks:{surface:string,aabb:Aabb}[], spawners?:{x:number,z:number}[]}} level
@@ -100,6 +103,11 @@ export class Game {
     this.milkZ = m ? (m.min.z + m.max.z) / 2 : 0;
     this.spawners = (level.spawners ?? []).map((s) => ({ x: s.x, z: s.z, cell: this.grid.cellAt(s.x, s.z), queue: 0, timer: 0 }));
     this.cows = new CowPool(cfg.maxCows);
+    // Auto-upgrade is a farm setting, not part of a run: restarting keeps it.
+    /** When on, tick() buys towers' next upgrades by itself (see updateAutoUpgrade). */
+    this.autoUpgrade = false;
+    /** Form id -> the variant auto-upgrade takes at that path choice (set by buying one, or the `autopath` command). */
+    this.autoPick = Object.create(null);
     this.reset();
   }
 
@@ -124,6 +132,7 @@ export class Game {
     this.kills = 0;
     this.time = 0;
     this.nextWaveIn = this.cfg.firstWave;
+    this.autoT = 0;
     for (const s of this.spawners) { s.queue = 0; s.timer = 0; }
     // Surprises draw from their own stream so rolling one never shifts which cows the wave brings.
     this.surpriseRng = mulberry32((this.cfg.seed ^ 0x5eed5eed) >>> 0);
@@ -377,6 +386,7 @@ export class Game {
     this.events.length = 0;
     if (this.lost) return;
     this.time += dt;
+    this.updateAutoUpgrade(dt);
     this.updateSpawners(dt);
     if (this.bountyTime > 0 && (this.bountyTime -= dt) <= 0) this.bountyMult = 1;
     this.updateFog(dt);
@@ -937,6 +947,37 @@ export class Game {
     return t;
   }
 
+  /** The form auto-upgrade takes next from `def`: its only upgrade, the remembered path, or the first path. Null when maxed. */
+  autoNext(def) {
+    const u = def.upgrades;
+    if (u.length === 0) return null;
+    if (u.length === 1) return u[0];
+    const pick = this.autoPick[def.id];
+    return pick && u.includes(pick) ? pick : u[0];
+  }
+
+  /**
+   * Auto-upgrade: at most one buy every AUTO_EVERY seconds, the cheapest
+   * affordable next level across all towers (ties: the oldest tower), so money
+   * spreads over the whole defence instead of maxing one tower first.
+   * Runs inside tick(), so its `upgraded` events (auto: true) reach the renderer and sound.
+   */
+  updateAutoUpgrade(dt) {
+    if (!this.autoUpgrade) return;
+    if (this.autoT > 0) { this.autoT -= dt; return; }
+    let best = null, bestForm = null, bestCost = Infinity;
+    for (const t of this.towers.values()) {
+      const f = this.autoNext(t.def);
+      if (f === null) continue;
+      const cost = TOWER_FORMS[f].upgradeCost;
+      if (cost <= this.money && cost < bestCost) { best = t; bestForm = f; bestCost = cost; }
+    }
+    if (!best) return;
+    this.upgradeTower(best.id, bestForm);
+    this.events[this.events.length - 1].auto = true;
+    this.autoT = AUTO_EVERY;
+  }
+
   /**
    * Turn tower `id` into form `formId` (one of its def.upgrades), paying the
    * upgrade cost. The tower keeps its place, kills and cooldown; selling it
@@ -949,6 +990,8 @@ export class Game {
     const next = TOWER_FORMS[formId];
     if (!next || !t.def.upgrades.includes(formId)) return { ok: false, reason: UpgradeError.NotAnUpgrade, tower: t };
     if (this.money < next.upgradeCost) return { ok: false, reason: UpgradeError.Money, tower: t };
+    // Picking a path teaches auto-upgrade which way to take every tower like this one.
+    if (t.def.upgrades.length > 1) this.autoPick[t.def.id] = formId;
     this.money -= next.upgradeCost;
     t.spent += next.upgradeCost;
     t.def = next;
@@ -957,7 +1000,7 @@ export class Game {
     t.charge = 0;
     t.cooldown = Math.min(t.cooldown, next.interval);
     this.aimAt(t, t.x + t.aimX, t.z + t.aimZ); // the muzzle may have moved
-    this.events.push({ kind: 'upgraded', tower: id, form: formId });
+    this.events.push({ kind: 'upgraded', tower: id, form: formId, x: t.x, z: t.z });
     return { ok: true, reason: null, tower: t };
   }
 

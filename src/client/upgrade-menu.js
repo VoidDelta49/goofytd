@@ -22,14 +22,17 @@ export function statDeltas(fromDef, toDef) {
 /**
  * Everything the panel shows for tower `t` with `money`. Pure.
  * options: one per next form, in definition order (that order is the 1/2 hotkeys).
+ * `auto` ({on, next}: auto-upgrade's state and the form it would take next) marks
+ * the card auto-upgrade follows (`autoPick`).
  */
-export function upgradeModel(t, money) {
+export function upgradeModel(t, money, auto = { on: false, next: null }) {
   const def = t.def;
   const options = def.upgrades.map((id, k) => {
     const f = TOWER_FORMS[id];
     return {
       id, n: k + 1, name: f.name, blurb: f.blurb, kind: f.kind, cost: f.upgradeCost,
       afford: money >= f.upgradeCost, accent: f.accent, level: f.level, deltas: statDeltas(def, f),
+      autoPick: auto.next === id,
     };
   });
   // The path so far, base first: for the level pips.
@@ -39,17 +42,19 @@ export function upgradeModel(t, money) {
     id: t.id, form: def.id, name: def.name, blurb: def.blurb, accent: def.accent,
     level: def.level, maxLevel: maxLevel(def.root), path: path.map((f) => ({ name: f.name, kind: f.kind })),
     stats: towerStats(def), kills: t.kills, refund: Math.floor(t.spent * SELL_REFUND),
-    choice: options.length > 1, maxed: options.length === 0, options,
+    choice: options.length > 1, maxed: options.length === 0, options, auto: auto.on,
   };
 }
 
 const hex = (c) => `#${c.toString(16).padStart(6, '0')}`;
+/** Auto-upgrade's state for the panel. */
+const autoOf = (game, t) => ({ on: game.autoUpgrade, next: game.autoNext(t.def) });
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 export class UpgradeMenu {
   /**
    * @param {HTMLElement} root the #upgrade overlay
-   * @param {{buy:(formId:string)=>void, sell:()=>void, close:()=>void}} actions
+   * @param {{buy:(formId:string)=>void, sell:()=>void, close:()=>void, toggleAuto:()=>void, autoPath:(formId:string)=>void}} actions
    */
   constructor(root, actions) {
     this.root = root;
@@ -105,6 +110,8 @@ export class UpgradeMenu {
     if (what === 'close') this.actions.close();
     else if (what === 'sell') this.actions.sell();
     else if (what === 'buy') this.actions.buy(el.dataset.form);
+    else if (what === 'auto') this.actions.toggleAuto();
+    else if (what === 'pin') this.actions.autoPath(el.dataset.form);
   }
 
   /** Per frame: close if the tower is gone, keep affordability current, rebuild after an upgrade. */
@@ -112,15 +119,37 @@ export class UpgradeMenu {
     if (!this.tower) return;
     if (game.lost || game.towers.get(this.tower.id) !== this.tower) { this.actions.close(); return; }
     if (this.model.form !== this.tower.def.id) { this.render(game, 'bought'); return; }
-    if (game.money !== this.money) {
+    const auto = autoOf(game, this.tower);
+    if (game.money !== this.money || auto.on !== this.model.auto || auto.next !== this.autoNext) {
       this.money = game.money;
-      this.model = upgradeModel(this.tower, game.money);
+      this.model = upgradeModel(this.tower, game.money, auto);
+      this.syncAuto(auto);
       for (const o of this.model.options) {
         this.sheet.querySelector(`.card[data-form="${o.id}"]`)?.classList.toggle('poor', !o.afford);
       }
     }
     const kills = `${this.tower.kills} kill${this.tower.kills === 1 ? '' : 's'}`;
     if (this.killsEl.textContent !== kills) this.killsEl.textContent = kills;
+  }
+
+  /** Auto-upgrade toggle label and which path card it follows, updated in place (a redraw would replay the cascade). */
+  syncAuto(auto) {
+    this.autoNext = auto.next;
+    const btn = this.sheet.querySelector('[data-up=auto]');
+    if (btn) {
+      btn.classList.toggle('on', auto.on);
+      btn.querySelector('b').textContent = auto.on ? 'ON' : 'OFF';
+    }
+    for (const o of this.model.options) {
+      const card = this.sheet.querySelector(`.card[data-form="${o.id}"]`);
+      if (!card) continue;
+      card.classList.toggle('autopick', o.autoPick && auto.on);
+      const pin = card.querySelector('[data-up=pin]');
+      if (pin) {
+        pin.classList.toggle('on', o.autoPick);
+        pin.textContent = o.autoPick ? '✓ AUTO PATH' : 'AUTO PATH';
+      }
+    }
   }
 
   /** Shake the card and say why (not enough moolah, …). */
@@ -145,7 +174,8 @@ export class UpgradeMenu {
 
   /** Full redraw; `how` is 'open' or 'bought' (adds the level-up burst). Re-running the markup restarts every cascade. */
   render(game, how) {
-    const m = (this.model = upgradeModel(this.tower, game.money));
+    const auto = autoOf(game, this.tower);
+    const m = (this.model = upgradeModel(this.tower, game.money, auto));
     this.money = game.money;
     const keys = !this.touchUi;
     const pips = [];
@@ -169,6 +199,7 @@ export class UpgradeMenu {
           <div class="cname">${esc(o.name)}</div>
           <p>${esc(o.blurb)}</p>
           <ul>${rows}</ul>
+          ${m.choice ? `<button class="pin" data-up="pin" data-form="${o.id}" title="Auto-upgrade takes this path">AUTO PATH</button>` : ''}
           <button data-up="buy" data-form="${o.id}">${keys ? `<kbd>${o.n}</kbd>` : ''}UPGRADE <span class="price">${o.cost}</span></button>
         </div>`;
       }).join('');
@@ -181,6 +212,7 @@ export class UpgradeMenu {
           <div class="tname">${esc(m.name)}</div>
           <div class="pips">${pips.join('')}<span class="lv">LV ${m.level}${m.maxed ? ' · MAX' : ''}</span></div>
         </div>
+        <button class="auto" data-up="auto" title="Auto-upgrade: towers buy their next level by themselves">${keys ? '<kbd>T</kbd>' : ''}AUTO <b>OFF</b></button>
         <button class="x" data-up="close" aria-label="Close upgrades">✕</button>
       </header>
       <div class="stats">${stats}</div>
@@ -191,10 +223,11 @@ export class UpgradeMenu {
         <span class="up-msg"></span>
         <button class="sell" data-up="sell">SELL <span class="price">+${m.refund}</span></button>
       </footer>
-      ${keys ? `<div class="keys">${m.maxed ? '' : m.options.map((o) => `<kbd>${o.n}</kbd>`).join(' ') + ' upgrade · '}<kbd>U</kbd>/<kbd>Q</kbd> close · <kbd>X</kbd> sell</div>` : ''}`;
+      ${keys ? `<div class="keys">${m.maxed ? '' : m.options.map((o) => `<kbd>${o.n}</kbd>`).join(' ') + ' upgrade · '}<kbd>T</kbd> auto · <kbd>U</kbd>/<kbd>Q</kbd> close · <kbd>X</kbd> sell</div>` : ''}`;
     this.killsEl = this.sheet.querySelector('.kills');
     this.killsEl.textContent = '';
     if (how === 'bought') this.flash(`${m.name}!`);
+    this.syncAuto(auto);
     this.update(game);
   }
 }

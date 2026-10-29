@@ -99,7 +99,8 @@ export class Hud {
     setText(this.tdEl,
       `milk ${Math.ceil(game.milk)} · moolah ${game.money}\n` +
       `wave ${game.wave} (${next}) · cows ${game.cows.count} · kills ${game.kills}` +
-      (game.players > 1 ? `\nfarmers ${game.players} · income ×${game.incomeMult}` : ''));
+      (game.players > 1 ? `\nfarmers ${game.players} · income ×${game.incomeMult}` : '') +
+      (game.autoUpgrade ? '\nauto-upgrade on' : ''));
 
     let place = '';
     if (build.message && now < build.messageUntil) place = build.message;

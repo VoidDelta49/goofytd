@@ -10,8 +10,8 @@ export class PauseMenu {
   /**
    * @param {HTMLElement} root the #pause overlay
    * @param {Record<string, (e: Event) => void>} actions keyed by data-menu name:
-   *   resume, sound, autoHop, sensDown, sensUp, fullscreen, respawn, restart
-   * @param {() => {muted: boolean, autoHop: boolean, sens: string}} getState
+   *   resume, sound, autoHop, autoUpgrade, sensDown, sensUp, fullscreen, respawn, restart
+   * @param {() => {muted: boolean, autoHop: boolean, autoUpgrade: boolean, sens: string}} getState
    */
   constructor(root, actions, getState) {
     this.root = root;
@@ -59,6 +59,7 @@ export class PauseMenu {
     const s = this.getState();
     this.el('sound').textContent = s.muted ? 'SOUND: OFF' : 'SOUND: ON';
     this.el('autoHop').textContent = s.autoHop ? 'AUTO-HOP: ON' : 'AUTO-HOP: OFF';
+    this.el('autoUpgrade').textContent = s.autoUpgrade ? 'AUTO-UPGRADE: ON' : 'AUTO-UPGRADE: OFF';
     this.el('sensLabel').textContent = `LOOK SPEED ${s.sens}`;
     const armed = performance.now() < this.restartArmedUntil;
     this.el('restart').textContent = armed ? 'TAP AGAIN TO RESTART' : 'RESTART GAME';

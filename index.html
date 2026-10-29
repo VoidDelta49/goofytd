@@ -12,24 +12,24 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-        "./src/client/audio.js": "./src/client/audio.js?v=5b06b70cc3",
+        "./src/client/audio.js": "./src/client/audio.js?v=fbf97fdb5a",
         "./src/client/batch.js": "./src/client/batch.js?v=15469463ed",
         "./src/client/build.js": "./src/client/build.js?v=aa882b37a4",
         "./src/client/cull.js": "./src/client/cull.js?v=b66ed8ca26",
         "./src/client/farmers.js": "./src/client/farmers.js?v=d7745ec03a",
-        "./src/client/hud.js": "./src/client/hud.js?v=f7ae6b2b53",
-        "./src/client/input.js": "./src/client/input.js?v=7ee3472989",
+        "./src/client/hud.js": "./src/client/hud.js?v=31373bf982",
+        "./src/client/input.js": "./src/client/input.js?v=ba12aa2966",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
         "./src/client/main-menu.js": "./src/client/main-menu.js?v=27b04ff35f",
-        "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
+        "./src/client/menu.js": "./src/client/menu.js?v=7915ee55ce",
         "./src/client/render.js": "./src/client/render.js?v=c6fadc3432",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
-        "./src/client/td-render.js": "./src/client/td-render.js?v=a6ceb514bf",
+        "./src/client/td-render.js": "./src/client/td-render.js?v=1479b1ee81",
         "./src/client/touch.js": "./src/client/touch.js?v=d975603b30",
-        "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=31164aaee0",
+        "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=e8e30fd00a",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=a3163b408b",
+        "./src/main.js": "./src/main.js?v=dc96aa9e24",
         "./src/net/discovery.js": "./src/net/discovery.js?v=dc2bd3fed0",
         "./src/net/lockstep.js": "./src/net/lockstep.js?v=ad417f39ba",
         "./src/net/peer.js": "./src/net/peer.js?v=33aa05ca05",
@@ -39,9 +39,9 @@
         "./src/net/track.js": "./src/net/track.js?v=cb2074a155",
         "./src/player.js": "./src/player.js?v=7536aa98e4",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
-        "./src/sim/commands.js": "./src/sim/commands.js?v=65a9a152bb",
+        "./src/sim/commands.js": "./src/sim/commands.js?v=857cda019b",
         "./src/sim/cows.js": "./src/sim/cows.js?v=e8bb8c30d1",
-        "./src/sim/game.js": "./src/sim/game.js?v=a48a536b15",
+        "./src/sim/game.js": "./src/sim/game.js?v=17d07fd7ba",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
@@ -391,6 +391,15 @@
     #upgrade .up-msg.show { animation: upMsg 1.8s ease-out both; }
     @keyframes upMsg { 0% { opacity: 0; transform: translateY(6px); } 12%, 70% { opacity: 1; transform: none; } 100% { opacity: 0; } }
     #upgrade .sell { border-color: #ff8a8a; color: #ffb0b0; }
+    /* Auto-upgrade: header toggle, and on path cards which way it goes. */
+    #upgrade .auto { flex: none; min-height: 36px; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+    #upgrade .auto b { color: #ff8a8a; }
+    #upgrade .auto.on { border-color: #7dff8a; background: #7dff8a22; }
+    #upgrade .auto.on b { color: #7dff8a; }
+    #upgrade .card button.pin { min-height: 30px; font-size: 10px; border-width: 1px; border-color: #fff4; background: #0003; opacity: .8; }
+    #upgrade .card button.pin.on { border-color: #7dff8a; color: #7dff8a; opacity: 1; }
+    #upgrade .card .pin + button { margin-top: 0; }
+    #upgrade .card.autopick { box-shadow: 0 0 0 2px #7dff8a66; }
     #upgrade .keys { text-align: center; font-size: 11px; opacity: .7; font-weight: 500; }
     /* Short landscape phones: every card already shows from → to, so the stats row goes and the
        cards tighten until the UPGRADE buttons fit without scrolling. */
@@ -410,6 +419,10 @@
       #upgrade .card li:nth-child(n+5) { display: none; }
       #upgrade .card button { min-height: 36px; }
       #upgrade button { min-height: 34px; }
+      /* Path cards: the auto-path toggle takes the badge's place ("CHOOSE YOUR PATH" already says they're variants), so it costs no height. */
+      #upgrade .card:has(.pin) .badge { display: none; }
+      #upgrade .card button.pin { order: -1; align-self: flex-start; min-height: 20px; padding: 0 6px; font-size: 9px; margin: 0; }
+      #upgrade .card .pin + button { margin-top: auto; }
     }
     @media (max-height: 340px) {
       #upgrade .card p { -webkit-line-clamp: 1; }
@@ -573,6 +586,7 @@
       <button class="wide primary" data-menu="resume">▶ RESUME</button>
       <button data-menu="sound">SOUND: ON</button>
       <button data-menu="autoHop">AUTO-HOP: OFF</button>
+      <button data-menu="autoUpgrade" title="Towers buy their next upgrade by themselves (T)">AUTO-UPGRADE: OFF</button>
       <div class="sens">
         <button data-menu="sensDown" aria-label="Look slower">−</button>
         <span data-menu="sensLabel">LOOK SPEED</span>

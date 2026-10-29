@@ -13,6 +13,7 @@ import './newtowers.test.js';
 import './coop.test.js';
 import './discovery.test.js';
 import './cull.test.js';
+import './auto.test.js';
 import './stamp.test.js'; // Node only: reads index.html and the sources
 import { runAll } from './harness.js';
 

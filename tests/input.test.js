@@ -255,7 +255,7 @@ test('touch buttons: NEXT WAVE hides before wave 1 (START button) and after losi
 
 function fakeMenu(state) {
   const els = {};
-  for (const n of ['sound', 'autoHop', 'sensLabel', 'restart']) {
+  for (const n of ['sound', 'autoHop', 'autoUpgrade', 'sensLabel', 'restart']) {
     els[n] = { textContent: '', classList: { on: false, toggle(_c, v) { this.on = v; } }, dataset: { menu: n } };
   }
   const root = { hidden: true, addEventListener() {}, querySelector: (sel) => els[/data-menu=(\w+)/.exec(sel)[1]] };
@@ -267,8 +267,9 @@ function fakeMenu(state) {
 }
 
 test('pause menu: labels show the current values and update when opened', () => {
-  const m = fakeMenu({ muted: true, autoHop: false, sens: '1.5' });
+  const m = fakeMenu({ muted: true, autoHop: false, autoUpgrade: true, sens: '1.5' });
   m.menu.show();
+  assert(m.els.autoUpgrade.textContent === 'AUTO-UPGRADE: ON', m.els.autoUpgrade.textContent);
   assert(!m.root.hidden, 'show should reveal the overlay');
   assert(m.els.sound.textContent === 'SOUND: OFF', m.els.sound.textContent);
   assert(m.els.autoHop.textContent === 'AUTO-HOP: OFF', m.els.autoHop.textContent);

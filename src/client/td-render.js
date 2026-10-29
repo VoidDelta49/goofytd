@@ -214,6 +214,10 @@ export class TdRenderer {
         const view = this.towerViews.get(e.tower);
         if (view) view.bonk = BONK_TIME;
         this.puff((e.x + e.cx) / 2, 0.7, (e.z + e.cz) / 2, 0.7, 0xfff3c0);
+      } else if (e.kind === 'upgraded') {
+        // Only auto-upgrades get here (they happen inside tick); bought ones are burst by main.js.
+        const t = this.game.towers.get(e.tower);
+        if (t) this.upgradeBurst(t);
       } else if (e.kind === 'spit') {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ x0: e.x0, y0: 1.1, z0: e.z0, x1: e.x1, y1: e.y1, z1: e.z1, color: 0x8fd14f, age: 0 });
         this.puff(e.x1, e.y1, e.z1, 0.8, 0x8fd14f);
