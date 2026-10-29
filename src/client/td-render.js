@@ -36,6 +36,13 @@ const MIST_COLOR = 0xc8ced3;
  */
 const COW_CULL_UP = 0.7;
 const COW_CULL_R = 2.0;
+/** The same for an upright boss: about 2.25 tall, arms raised overhead reach 2.6 (and she leans back). */
+const BOSS_CULL_UP = 1.2;
+const BOSS_CULL_R = 1.8;
+/** Most upright bosses drawn at once (they're one per boss wave). */
+const MAX_BOSSES = 16;
+/** Height of Big Mama's shoulders in model units: her arms pivot there. */
+const SHOULDER_Y = 1.5;
 
 export class TdRenderer {
   /**
@@ -73,6 +80,21 @@ export class TdRenderer {
     this.wingMesh.frustumCulled = false;
     this.wingMesh.count = 0;
     scene.add(this.wingMesh);
+    // Upright bosses (Big Mama Bessie): her own model standing on her hind legs, plus her arms
+    // (and handbag) as a second instanced draw so they can swing. Few of them, so a small buffer.
+    const bossMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75 });
+    this.bossMesh = new THREE.InstancedMesh(bossGeometry(), bossMat, MAX_BOSSES);
+    this.bossArms = new THREE.InstancedMesh(bossArmsGeometry(), bossMat, MAX_BOSSES);
+    for (const m of [this.bossMesh, this.bossArms]) {
+      m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      m.setColorAt(0, new THREE.Color(1, 1, 1));
+      m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      m.frustumCulled = false;
+      m.count = 0;
+      scene.add(m);
+    }
     this.wingLocal = new THREE.Matrix4();
     this.wingTmp = new THREE.Matrix4();
     this.cowMatrix = new THREE.Matrix4();
@@ -218,6 +240,23 @@ export class TdRenderer {
         // Only auto-upgrades get here (they happen inside tick); bought ones are burst by main.js.
         const t = this.game.towers.get(e.tower);
         if (t) this.upgradeBurst(t);
+      } else if (e.kind === 'stomp') {
+        // A ring of dust where the shockwave reaches, and a thud in the middle.
+        for (let k = 0; k < 10; k++) {
+          const a = (k / 10) * Math.PI * 2;
+          this.puff(e.x + Math.cos(a) * e.radius * 0.75, 0.4, e.z + Math.sin(a) * e.radius * 0.75, 1.4, 0xb89a72);
+        }
+        this.puff(e.x, 0.3, e.z, e.radius * 0.6, 0xd9c3a0);
+        this.puff(e.x, 1.2, e.z, 2.2, 0xfff3c0);
+      } else if (e.kind === 'wallop') {
+        const view = this.towerViews.get(e.tower);
+        if (view) view.bonk = BONK_TIME;
+        this.puff((e.x + e.cx) / 2, 1.4, (e.z + e.cz) / 2, 1.0, 0xff5a8a);
+      } else if (e.kind === 'bellow') {
+        this.puff(e.x, 3.5, e.z, 3.2, 0xffa8d0);
+        this.puff(e.x, 1.0, e.z, 2.6, 0xffffff);
+      } else if (e.kind === 'bossspawn') {
+        this.puff(e.x, 1.0, e.z, 4, 0xffa8d0);
       } else if (e.kind === 'spit') {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ x0: e.x0, y0: 1.1, z0: e.z0, x1: e.x1, y1: e.y1, z1: e.z1, color: 0x8fd14f, age: 0 });
         this.puff(e.x1, e.y1, e.z1, 0.8, 0x8fd14f);
@@ -311,12 +350,14 @@ export class TdRenderer {
     const cull = this.cull && !!sun;
     const maxWings = this.wingMesh.instanceMatrix.count;
     let n = 0, wings = 0;
+    this.bossCount = 0;
     for (let i = 0; i < c.count; i++) {
       const x = c.px[i] + (c.x[i] - c.px[i]) * alpha;
       const z = c.pz[i] + (c.z[i] - c.pz[i]) * alpha;
       const ti = c.type[i];
       const type = COW_TYPE_LIST[ti];
       const s0 = type.scale;
+      if (type.upright) { this.syncBoss(i, type, x, z, cull); continue; }
       if (cull) {
         shadowedSphere(x, type.altitude + COW_CULL_UP * s0, z, COW_CULL_R * s0, sun, sph);
         if (!sphereVisible(planes, sph[0], sph[1], sph[2], sph[3])) continue;
@@ -375,13 +416,70 @@ export class TdRenderer {
       colArr[n * 3] = col.r; colArr[n * 3 + 1] = col.g; colArr[n * 3 + 2] = col.b;
       n++;
     }
-    this.stats.cows = n;
-    this.stats.cowsCulled = c.count - n;
+    const bn = this.bossCount;
+    this.stats.cows = n + bn;
+    this.stats.cowsCulled = c.count - n - bn;
     m.count = n;
+    for (const bm of [this.bossMesh, this.bossArms]) {
+      bm.count = bn;
+      if (bn) { uploadRange(bm.instanceMatrix, bn * 16); uploadRange(bm.instanceColor, bn * 3); }
+    }
     // Upload only the instances in use, not the whole 4096-cow buffer.
     if (n) { uploadRange(m.instanceMatrix, n * 16); uploadRange(m.instanceColor, n * 3); }
     this.wingMesh.count = wings;
     if (wings) uploadRange(this.wingMesh.instanceMatrix, wings * 16);
+  }
+
+  /**
+   * One upright boss: her pose comes from what she's doing (Game.bosses):
+   * waddling, rearing up with both hooves overhead for the Hoof Stomp,
+   * winding her handbag back for the Purse Wallop, or bellowing for her babies.
+   */
+  syncBoss(i, type, x, z, cull) {
+    const c = this.game.cows, k = this.bossCount;
+    if (k >= MAX_BOSSES) return;
+    const s = type.scale;
+    if (cull) {
+      const sph = this.sphere;
+      shadowedSphere(x, BOSS_CULL_UP * s, z, BOSS_CULL_R * s, this.view.sunOffset, sph);
+      if (!sphereVisible(this.planes, sph[0], sph[1], sph[2], sph[3])) return;
+    }
+    const b = this.game.bosses.get(c.id[i]);
+    const angry = type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i];
+    const ph = this.time * (angry ? 11 : 7) + c.id[i] * 1.7;
+    const ry = Math.atan2(-c.vx[i], -c.vz[i]);
+    let y = Math.abs(Math.sin(ph)) * 0.05 * s, rx = 0, rz = Math.sin(ph * 0.5) * (angry ? 0.14 : 0.09);
+    let arms = 0.35 + Math.sin(ph * 0.5) * 0.3;
+    if (b?.act) {
+      const kk = 1 - Math.max(0, b.actT) / b.actLen; // 0 → 1 over the wind-up
+      const shake = Math.sin(this.time * 40) * 0.04 * kk;
+      if (b.act === 'stomp') {
+        // Rear up on her toes, lean back, hooves high: then SLAM.
+        y = 0.35 * kk * s; rx = 0.28 * kk; rz = shake; arms = 0.4 + 2.5 * kk;
+      } else if (b.act === 'wallop') {
+        // Handbag back over her shoulder.
+        rx = 0.15 * kk; rz = shake; arms = 0.4 + 2.7 * kk;
+      } else {
+        // Bellowing: head back, hooves out, wobbling.
+        rx = 0.3; rz = Math.sin(this.time * 25) * 0.06; arms = 1.5 + Math.sin(this.time * 18) * 0.25;
+      }
+    }
+    const mat = this.bossMesh.instanceMatrix.array;
+    composeYXZ(mat, k * 16, x, y, z, rx, ry, rz, s);
+    const body = this.cowMatrix.fromArray(mat, k * 16);
+    this.wingLocal.makeTranslation(0, SHOULDER_Y, 0).multiply(this.wingTmp.makeRotationX(arms));
+    this.wingTmp.multiplyMatrices(body, this.wingLocal).toArray(this.bossArms.instanceMatrix.array, k * 16);
+    const col = this.tmpColor.copy(this.typeColors[c.type[i]]);
+    if (angry) col.lerp(this.rage, 0.35 + 0.15 * Math.sin(this.time * 9));
+    if (c.chillT[i] > 0) col.lerp(this.ice, 0.55);
+    else if (c.slowT[i] > 0) col.lerp(this.goo, 0.45);
+    if (c.burnT[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1));
+    col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
+    for (const bm of [this.bossMesh, this.bossArms]) {
+      const a = bm.instanceColor.array;
+      a[k * 3] = col.r; a[k * 3 + 1] = col.g; a[k * 3 + 2] = col.b;
+    }
+    this.bossCount++;
   }
 
   syncTowers() {
@@ -539,6 +637,69 @@ export class TdRenderer {
       this.puffPool.set(p.id, p.x, p.y, p.z, r, r, r, p.color, 0.7 * (1 - s));
     }
   }
+}
+
+/**
+ * BIG MAMA BESSIE, standing on her hind legs (the only cow that does), facing
+ * -Z, about 2.25 tall before scaling: a barrel of a cow in a frilly pink apron,
+ * pearls and a big bow. Her arms are bossArmsGeometry() so they can swing.
+ */
+function bossGeometry() {
+  const W = 0xffffff, K = 0x1d1d1d, P = 0xf2a0b0, H = 0xe8dcc0, A = 0xff7fb0, F = 0xfff0f6, R = 0xff3d8b, L = 0xfafafa;
+  const boxes = [
+    [[-0.44, 0.7, -0.32], [0.44, 1.66, 0.32], W], // torso, standing up
+    [[-0.34, 0.8, -0.335], [0.34, 1.42, -0.32], A], // apron
+    [[-0.36, 0.74, -0.345], [0.36, 0.82, -0.32], F], // apron frill
+    [[-0.12, 1.42, -0.335], [0.12, 1.5, -0.32], A], // apron bib
+    [[-0.08, 1.05, -0.35], [0.08, 1.17, -0.335], F], // apron pocket
+    [[0.44, 0.95, -0.2], [0.45, 1.4, 0.15], K], // patch, right side
+    [[-0.45, 0.8, -0.05], [-0.44, 1.2, 0.25], K], // patch, left side
+    [[-0.3, 1.0, 0.32], [0.15, 1.5, 0.33], K], // patch, back
+    [[-0.15, 0.6, -0.3], [0.15, 0.72, -0.08], P], // udder, peeking out under the apron
+    [[-0.28, 1.66, -0.3], [0.28, 2.1, 0.16], W], // head
+    [[-0.23, 1.66, -0.43], [0.23, 1.86, -0.29], P], // snout
+    [[-0.15, 1.74, -0.44], [-0.07, 1.8, -0.43], K], // nostril L
+    [[0.07, 1.74, -0.44], [0.15, 1.8, -0.43], K], // nostril R
+    [[-0.21, 1.92, -0.31], [-0.08, 2.03, -0.3], K], // eye L
+    [[0.08, 1.92, -0.31], [0.21, 2.03, -0.3], K], // eye R
+    [[-0.23, 2.03, -0.31], [-0.06, 2.06, -0.3], K], // lashes L (she's glamorous)
+    [[0.06, 2.03, -0.31], [0.23, 2.06, -0.3], K], // lashes R
+    [[-0.4, 2.02, -0.12], [-0.27, 2.2, -0.02], H], // horn L
+    [[0.27, 2.02, -0.12], [0.4, 2.2, -0.02], H], // horn R
+    [[-0.47, 1.9, -0.05], [-0.28, 1.98, 0.05], K], // ear L
+    [[0.28, 1.9, -0.05], [0.47, 1.98, 0.05], K], // ear R
+    [[-0.06, 2.1, -0.12], [0.06, 2.2, -0.02], R], // bow knot
+    [[-0.24, 2.1, -0.13], [-0.06, 2.26, -0.01], R], // bow L
+    [[0.06, 2.1, -0.13], [0.24, 2.26, -0.01], R], // bow R
+    [[-0.04, 0.9, 0.32], [0.04, 0.98, 0.62], W], // tail
+    [[-0.07, 0.62, 0.56], [0.07, 0.9, 0.64], K], // tail tuft
+  ];
+  // Pearl necklace round the front of her neck.
+  for (let k = -3; k <= 3; k++) {
+    const y = 1.56 + Math.abs(k) * 0.012; // dips at the front
+    boxes.push([[k * 0.07 - 0.03, y, -0.36], [k * 0.07 + 0.03, y + 0.06, -0.31], L]);
+  }
+  for (const x of [-0.22, 0.22]) {
+    boxes.push([[x - 0.12, 0.08, -0.12], [x + 0.12, 0.72, 0.12], W]); // hind legs
+    boxes.push([[x - 0.14, 0, -0.17], [x + 0.14, 0.1, 0.14], K]); // hooves
+  }
+  return boxesGeometry(boxes);
+}
+
+/** Her arms, pivoting at the shoulder (the origin here), hanging down -Y, with a handbag in the right hoof. */
+function bossArmsGeometry() {
+  const W = 0xffffff, K = 0x1d1d1d, B = 0xc8234a, G = 0xffc933;
+  const boxes = [];
+  for (const x of [-0.53, 0.53]) {
+    boxes.push([[x - 0.1, -0.68, -0.1], [x + 0.1, 0.06, 0.1], W]); // arm
+    boxes.push([[x - 0.11, -0.8, -0.11], [x + 0.11, -0.68, 0.11], K]); // front hoof
+  }
+  boxes.push([[0.6, -1.12, -0.16], [0.78, -0.86, 0.16], B]); // handbag
+  boxes.push([[0.6, -0.86, -0.1], [0.78, -0.82, -0.06], G]); // strap
+  boxes.push([[0.6, -0.86, 0.06], [0.78, -0.82, 0.1], G]);
+  boxes.push([[0.6, -0.82, -0.1], [0.78, -0.78, 0.1], G]);
+  boxes.push([[0.78, -1.0, -0.04], [0.79, -0.94, 0.04], G]); // clasp
+  return boxesGeometry(boxes);
 }
 
 /** One wing: a flat feathery plank sticking out along +X from the shoulder (mirrored for the left). */

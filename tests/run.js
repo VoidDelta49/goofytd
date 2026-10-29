@@ -9,6 +9,7 @@ import './upgrades.test.js';
 import './surprises.test.js';
 import './variants.test.js';
 import './retaliation.test.js';
+import './bosses.test.js';
 import './newtowers.test.js';
 import './coop.test.js';
 import './discovery.test.js';

@@ -34,6 +34,12 @@
  *                and tipping it mid wind-up cancels the attack
  *   firstWave, weight   when it starts showing up in waves, and how often
  *                relative to the others (see waveMix)
+ *   boss         a boss: spawned by boss waves (Game.bossEvery), gets the boss
+ *                health bar, can't be tipped, and runs its own attack script
+ *                (see `bossAttacks` and Game.bossAct). Bosses keep their extra
+ *                state in Game.bosses, keyed by cow id
+ *   upright      drawn standing on its hind legs (its own model)
+ *   slowResist   0..1: this much of every slow is shrugged off (0.5 halves it)
  */
 export const COW_TYPES = {};
 /** Index -> type, so a cow stores its type as a small integer. */
@@ -56,6 +62,7 @@ export function defineCow(def) {
     name: def.id, scale: 1, color: 0xffffff, altitude: 0, blastRadius: 0, firstWave: 1, weight: 1,
     armor: 0, splitInto: null, splitCount: 0, enrageBelow: 0, enrageSpeed: 1, healRate: 0, healRadius: 0, camo: 0,
     ramDamage: 0, spitRange: 0, spitStun: 0, spitDamage: 0, windup: 0, abilityCooldown: 0,
+    boss: null, upright: false, slowResist: 0,
     ...def, index: COW_TYPE_LIST.length,
   });
   COW_TYPES[def.id] = t;
@@ -161,6 +168,25 @@ defineCow({
   weight: 0,
 });
 
+// The boss. Spawned by boss waves (every Game cfg.bossEvery waves), never by a mix.
+// Every attack is telegraphed and she stands still for it, so each one is also a window of free shots.
+
+defineCow({
+  id: 'bigmama', name: 'BIG MAMA BESSIE', hp: 2000, speed: 1.5, bounty: 300, damage: 60, radius: 1.1, scale: 2.1, color: 0xffffff,
+  // Mild armour: a swarm of chip damage is weak against her, real guns aren't.
+  armor: 3, slowResist: 0.5, upright: true, weight: 0,
+  // Last phase: MAMA IS ANGRY. Faster and stomps more often (reuses the Raging Bull enrage).
+  enrageBelow: 1 / 3, enrageSpeed: 1.4,
+  boss: Object.freeze({
+    /** Hoof Stomp: rears up and slams the ground. Every tower within `radius` m (to its edge) takes `damage` and is stunned. */
+    stomp: Object.freeze({ radius: 7, damage: 15, stun: 1.5, windup: 1.4, cooldown: 9, angryCooldown: 6, first: 4 }),
+    /** Purse Wallop: a tower right next to her gets her handbag. */
+    wallop: Object.freeze({ damage: 45, windup: 0.9, cooldown: 4 }),
+    /** "MAMA'S BABIES!": under each fraction of max HP she stops, bellows, and calls cows of `type` to her side. */
+    summon: Object.freeze({ at: Object.freeze([2 / 3, 1 / 3]), type: 'mama', count: 2, bellow: 1.5 }),
+  }),
+});
+
 defineCow({
   id: 'calf', name: 'Calf', hp: 6, speed: 4.5, bounty: 1, damage: 1, radius: 0.35, scale: 0.5, color: 0xffffff,
   weight: 0,
@@ -177,6 +203,7 @@ defineCow({
 });
 
 for (const t of COW_TYPE_LIST) {
+  if (t.boss && !COW_TYPES[t.boss.summon.type]) throw new Error(`cow type ${t.id}: summons unknown ${t.boss.summon.type}`);
   if (t.splitInto && !COW_TYPES[t.splitInto]) throw new Error(`cow type ${t.id}: splits into unknown ${t.splitInto}`);
 }
 

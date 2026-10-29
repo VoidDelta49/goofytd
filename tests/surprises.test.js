@@ -75,6 +75,8 @@ test('surprises: rate follows the chance, wave 1 never, never 3 quiet waves in a
       const n = g.surpriseLog.length - before;
       g.runs.length = 0; // only the schedule matters here
       if (w === 1) { assert(n === 0, 'surprise in wave 1'); continue; }
+      // Boss waves have the boss instead of a surprise (bosses.test.js covers them).
+      if (g.isBossWave(w)) { assert(n === 0, `surprise on boss wave ${w}`); quiet = 0; continue; }
       quiet = n ? 0 : quiet + 1;
       assert(quiet <= g.cfg.surpriseDrought, `seed ${seed}: ${quiet} quiet waves in a row`);
       const ids = g.surpriseLog.slice(before).map((s) => s.id);

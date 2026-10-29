@@ -12,24 +12,24 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-        "./src/client/audio.js": "./src/client/audio.js?v=fbf97fdb5a",
+        "./src/client/audio.js": "./src/client/audio.js?v=a55edec521",
         "./src/client/batch.js": "./src/client/batch.js?v=15469463ed",
         "./src/client/build.js": "./src/client/build.js?v=aa882b37a4",
         "./src/client/cull.js": "./src/client/cull.js?v=b66ed8ca26",
         "./src/client/farmers.js": "./src/client/farmers.js?v=d7745ec03a",
-        "./src/client/hud.js": "./src/client/hud.js?v=bc3cc9bd96",
+        "./src/client/hud.js": "./src/client/hud.js?v=c3e13e0d4a",
         "./src/client/input.js": "./src/client/input.js?v=b60fd21e29",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
         "./src/client/main-menu.js": "./src/client/main-menu.js?v=27b04ff35f",
         "./src/client/menu.js": "./src/client/menu.js?v=f94a871c73",
         "./src/client/render.js": "./src/client/render.js?v=c6fadc3432",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
-        "./src/client/td-render.js": "./src/client/td-render.js?v=1479b1ee81",
+        "./src/client/td-render.js": "./src/client/td-render.js?v=c4d5f54567",
         "./src/client/touch.js": "./src/client/touch.js?v=ce6d5da16e",
         "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=e8e30fd00a",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=686451ec26",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=f0dffa05af",
+        "./src/main.js": "./src/main.js?v=b99274f5e3",
         "./src/net/discovery.js": "./src/net/discovery.js?v=dc2bd3fed0",
         "./src/net/lockstep.js": "./src/net/lockstep.js?v=93eca31ea4",
         "./src/net/peer.js": "./src/net/peer.js?v=33aa05ca05",
@@ -37,11 +37,11 @@
         "./src/net/session.js": "./src/net/session.js?v=dbd36605c3",
         "./src/net/signal.js": "./src/net/signal.js?v=28bdd77224",
         "./src/net/track.js": "./src/net/track.js?v=cb2074a155",
-        "./src/player.js": "./src/player.js?v=7536aa98e4",
+        "./src/player.js": "./src/player.js?v=2507879531",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
-        "./src/sim/commands.js": "./src/sim/commands.js?v=37070bdc8f",
-        "./src/sim/cows.js": "./src/sim/cows.js?v=e8bb8c30d1",
-        "./src/sim/game.js": "./src/sim/game.js?v=fc9291b8e4",
+        "./src/sim/commands.js": "./src/sim/commands.js?v=4cd65394e4",
+        "./src/sim/cows.js": "./src/sim/cows.js?v=1874b79e62",
+        "./src/sim/game.js": "./src/sim/game.js?v=61739d698a",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
@@ -123,6 +123,26 @@
       font-size: 24px; font-weight: 700; padding: 10px 18px; border-radius: 10px; background: #000b;
     }
     #hud [data-hud=banner]:empty, #hud [data-hud=place]:empty { display: none; }
+    /* Boss health bar: top centre, under the notice line. Ticks mark where she calls her babies. */
+    #hud [data-hud=boss] {
+      position: absolute; left: 50%; top: calc(46px + env(safe-area-inset-top)); transform: translateX(-50%);
+      width: min(520px, 62vw); text-align: center;
+    }
+    #hud [data-hud=boss][hidden] { display: none; }
+    #hud .boss-name { font-size: 18px; font-weight: 800; letter-spacing: 2px; color: #ffd6e4; }
+    #hud .boss-bar {
+      position: relative; height: 16px; margin-top: 3px; border: 2px solid #fffd; border-radius: 9px;
+      background: #000a; overflow: hidden; box-shadow: 0 0 10px #ff3d8b66;
+    }
+    #hud .boss-fill { height: 100%; width: 100%; background: linear-gradient(#ff8fbd, #e0306f); transition: width 0.15s; }
+    #hud .boss-bar.angry .boss-fill { background: linear-gradient(#ff7a5a, #c41a1a); }
+    #hud .boss-bar.angry { animation: bossThrob 0.5s ease-in-out infinite alternate; }
+    @keyframes bossThrob { to { box-shadow: 0 0 18px #ff2a2acc; } }
+    @media (prefers-reduced-motion: reduce) { #hud .boss-bar.angry { animation: none; } }
+    #hud .boss-bar i { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #fffa; }
+    #hud .boss-sub { margin-top: 2px; font-size: 13px; color: #ffe9f1; }
+    /* Portrait phones: the milk / moolah block sits top left there, so drop the bar below it. */
+    @media (orientation: portrait) { body.touch-device #hud [data-hud=boss] { top: calc(150px + env(safe-area-inset-top)); width: 78vw; } }
     /* First-wave button: waves don't start until you say so, so you can build first. */
     #hud [data-hud=startwave], #hud [data-hud=restart] {
       position: absolute; left: 50%; bottom: calc(64px + env(safe-area-inset-bottom)); transform: translateX(-50%);
@@ -558,6 +578,11 @@
     <div class="crosshair"></div>
     <div data-hud="place"></div>
     <div data-hud="buildbar"></div>
+    <div data-hud="boss" hidden>
+      <div class="boss-name"></div>
+      <div class="boss-bar"><div class="boss-fill"></div></div>
+      <div class="boss-sub"></div>
+    </div>
     <div data-hud="banner"></div>
     <button data-hud="startwave" tabindex="-1" hidden>START WAVE 1 <kbd class="desk-only">N</kbd></button>
     <button data-hud="restart" tabindex="-1" hidden>TRY AGAIN <kbd class="desk-only">Enter</kbd></button>

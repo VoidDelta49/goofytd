@@ -49,7 +49,7 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
 
 test('cows: spawners use the mix (wave 1 plain, wave 11 everything) with per-wave HP', () => {
   // Surprises off: this checks the wave formula alone (surprises.test.js covers them).
-  const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9, surprises: false });
+  const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9, surprises: false, bossEvery: 0 });
   const seen = [];
   const spawn = g.spawnCow.bind(g);
   g.spawnCow = (type, x, z, hp) => { seen.push({ wave: g.wave, id: type.id, hp }); return spawn(type, x, z, hp); };

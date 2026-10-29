@@ -197,6 +197,31 @@ const SOUNDS = {
       v.tone('square', [400, 80], 0.5, 0.25, { lowpass: [1500, 300] });
     },
   },
+  // BIG MAMA BESSIE's Hoof Stomp landing: a ground-shaking thud and a rumble.
+  stomp: {
+    gap: 0.3, max: 2, vol: 1.0,
+    build(v) {
+      v.tone('sine', [75, 28], 0.9, 1.0);
+      v.noise(1.1, 0.9, 'lowpass', [1000, 70], 0.7, { attack: 0.004 });
+      v.tone('triangle', [150, 45], 0.3, 0.5);
+    },
+  },
+  // Big Mama calling her babies (and arriving): a huge, wobbly, very low moo.
+  bellow: {
+    gap: 0.6, max: 1, vol: 1.0,
+    build(v, p) {
+      const moo = { attack: 0.1, lowpass: [280, 900, 700, 240], q: 2, vibrato: [4.5, 5] };
+      v.tone('sawtooth', [70 * p, 105 * p, 100 * p, 62 * p], 1.4, 0.7, moo);
+      v.tone('sawtooth', [35 * p, 52 * p, 50 * p, 31 * p], 1.4, 0.5, moo);
+    },
+  },
+  // Wind-ups: a handbag swung back, or Mama rearing up for a stomp.
+  whoosh: {
+    gap: 0.2, max: 2, vol: 0.8,
+    build(v, p) {
+      v.noise(0.4, 0.6, 'bandpass', [400 * p, 2400 * p], 1.2, { attack: 0.2 });
+    },
+  },
   // A cow going down: a short surprised moo.
   kill: {
     gap: 0.06, max: 3, vol: 0.9,
@@ -671,6 +696,10 @@ export class Sfx {
         case 'windup': this.play(e.ram ? 'snort' : 'hawk', e.x, e.z); break;
         case 'bonk': this.play('bonk', e.x, e.z); break;
         case 'spit': this.play('spit', e.x1, e.z1); break;
+        case 'bosswindup': this.play(e.act === 'bellow' ? 'bellow' : e.act === 'stomp' ? 'snort' : 'whoosh', e.x, e.z); break;
+        case 'stomp': this.play('stomp', e.x, e.z); break;
+        case 'wallop': this.play('bonk', e.x, e.z); break;
+        case 'bossspawn': this.play('bellow', e.x, e.z); break;
         case 'destroyed': if (e.cause === 'bonk') this.play('wreck', e.x, e.z); break;
         case 'wave': this.play('wave'); break;
         // Positioned when the surprise has a place (an ambush), so you can hear which way to look.

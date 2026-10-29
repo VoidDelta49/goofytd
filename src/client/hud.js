@@ -25,6 +25,13 @@ export class Hud {
     this.startEl = root.querySelector('[data-hud=startwave]');
     /** "Try again" button, shown once the milk is gone (Enter only works with a keyboard). */
     this.restartEl = root.querySelector('[data-hud=restart]');
+    this.bossEl = root.querySelector('[data-hud=boss]');
+    this.bossName = this.bossEl.querySelector('.boss-name');
+    this.bossBar = this.bossEl.querySelector('.boss-bar');
+    this.bossFill = this.bossEl.querySelector('.boss-fill');
+    this.bossSub = this.bossEl.querySelector('.boss-sub');
+    /** Phase lines drawn for this list of fractions (rebuilt only if it changes). */
+    this.bossTicks = null;
     this.buildSlots = [];
     /** Touch layout: hints name the on-screen buttons instead of keys. */
     this.touchUi = document.body.classList.contains('touch-device');
@@ -65,6 +72,27 @@ export class Hud {
       // On touch, look speed lives in the pause menu; keep this line short so it clears NEXT WAVE.
       (input.touch.enabled ? '' : ` · sens ${input.settings.sensitivity.toFixed(1)}`) +
       ` · ${avg > 0 ? Math.round(1 / avg) : 0} fps`;
+  }
+
+  /** The boss health bar, shown while a boss is on the field. */
+  updateBoss(st) {
+    const show = !!st;
+    if (this.bossEl.hidden === show) this.bossEl.hidden = !show;
+    if (!st) return;
+    if (this.bossTicks !== st.phases) {
+      this.bossTicks = st.phases;
+      this.bossBar.querySelectorAll('i').forEach((el) => el.remove());
+      for (const f of st.phases) {
+        const tick = document.createElement('i');
+        tick.style.left = `${f * 100}%`;
+        this.bossBar.appendChild(tick);
+      }
+    }
+    const pct = `${Math.max(0, Math.min(1, st.hp / st.maxHp)) * 100}%`;
+    if (this.bossFill.style.width !== pct) this.bossFill.style.width = pct;
+    this.bossBar.classList.toggle('angry', st.angry);
+    setText(this.bossName, st.count > 1 ? `${st.name} ×${st.count}` : st.name);
+    setText(this.bossSub, `${Math.ceil(st.hp)} / ${Math.ceil(st.maxHp)} · ${bossLine(st)}`);
   }
 
   /** Milk, money, wave, build bar and placement feedback. Cheap: only touches the DOM when text changes. */
@@ -119,8 +147,19 @@ export class Hud {
     }
     setText(this.placeEl, place);
     this.placeEl.classList.toggle('bad', !!build.preview && !build.preview.ok);
+    this.updateBoss(game.bossStatus());
     setText(this.bannerEl, game.lost ? `THE COWS DRANK ALL THE MILK\nwave ${game.wave} · ${game.kills} kills` : '');
   }
+}
+
+/** What the line under the boss bar says. */
+export function bossLine(st) {
+  if (st.act === 'stomp') return 'HOOF STOMP incoming! Get off the ground!';
+  if (st.act === 'wallop') return 'Purse wallop!';
+  if (st.act === 'bellow') return 'MOOOOOOOO!';
+  const n = st.phases.length + 1;
+  const phase = st.angry ? 'MAMA IS ANGRY' : st.phase === 0 ? 'Out for a stroll' : 'Calling her babies';
+  return `phase ${st.phase + 1}/${n} · ${phase}`;
 }
 
 function setText(el, text) {

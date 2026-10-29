@@ -40,6 +40,14 @@ export function defaultGameConfig() {
     /** From this wave on, a wave that rolled a surprise may roll a second one. */
     doubleSurpriseWave: 8,
     doubleSurpriseChance: 0.25,
+    /**
+     * Every this many waves is a boss wave (0 or null: never): half the usual
+     * herd, no surprises, and BIG MAMA BESSIE walks in bossDelay s after it starts.
+     * Each boss after the first has bossHpGrowth × more HP on top of the wave scaling.
+     */
+    bossEvery: 10,
+    bossDelay: 6,
+    bossHpGrowth: 0.5,
     maxCows: 4096,
     /** Farmers sharing this match (LAN co-op). Everyone spends from one shared wallet. */
     players: 1,
@@ -83,6 +91,9 @@ export const RAM_REACH = BLAST_TRIGGER;
 export const FOG_IN = 3;
 export const FOG_OUT = 4;
 export const FOG_SIGHT_CUT = 0.35;
+
+/** The cow type boss waves bring. */
+export const BOSS_COW = 'bigmama';
 
 /** Auto-upgrade: seconds between automatic buys, so each one gets its own pop and sound. */
 export const AUTO_EVERY = 0.4;
@@ -170,6 +181,14 @@ export class Game {
     this.fogT = 0;
     this.fogDur = 0;
     this.sight = 1;
+    // Bosses draw from their own stream too, so a boss wave never shifts the regular or surprise draws.
+    this.bossRng = mulberry32((this.cfg.seed ^ 0xb055b055) >>> 0);
+    /** Bosses on their way: { t (s until she walks in), announced }. */
+    this.bossQueue = [];
+    /** Bosses spawned this match (the next one is tougher). */
+    this.bossCount = 0;
+    /** Cow id -> live boss state (see bossAct). Insertion-ordered, so it iterates the same on every machine. */
+    this.bosses = new Map();
   }
 
   /** Co-op: income × this (1 alone, 1.5 with two farmers, 2 with three, 2.5 with four). */
@@ -191,7 +210,10 @@ export class Game {
   startWave() {
     if (this.lost || this.spawners.length === 0) return;
     this.wave++;
-    const total = this.cfg.waveBase + this.cfg.waveGrowth * (this.wave - 1);
+    const boss = this.isBossWave(this.wave);
+    let total = this.cfg.waveBase + this.cfg.waveGrowth * (this.wave - 1);
+    // A boss wave brings half the herd: she's the main course.
+    if (boss) total = Math.ceil(total / 2);
     this.spawners.forEach((s, k) => {
       s.queue += Math.floor(total / this.spawners.length) + (k < total % this.spawners.length ? 1 : 0);
     });
@@ -200,8 +222,17 @@ export class Game {
     this.nextWaveIn = null;
     this.spawnHold = 0;
     this.spawnRate = 1;
-    if (this.cfg.surprises) this.rollSurprises();
-    this.events.push({ kind: 'wave', wave: this.wave });
+    if (boss) {
+      // The boss is this wave's surprise: no others, and it counts toward the drought guarantee.
+      this.queueBoss();
+      this.wavesWithoutSurprise = 0;
+    } else if (this.cfg.surprises) this.rollSurprises();
+    this.events.push({ kind: 'wave', wave: this.wave, boss });
+  }
+
+  isBossWave(wave) {
+    const n = this.cfg.bossEvery;
+    return n > 0 && wave > 0 && wave % n === 0;
   }
 
   /**
@@ -221,7 +252,182 @@ export class Game {
     if (paid) this.events.push({ kind: 'interest', amount: paid });
   }
 
-  get spawning() { return this.runs.length > 0 || this.spawners.some((s) => s.queue > 0); }
+  get spawning() { return this.runs.length > 0 || this.bossQueue.length > 0 || this.spawners.some((s) => s.queue > 0); }
+
+  // ---- bosses -------------------------------------------------------------
+
+  /**
+   * BIG MAMA BESSIE walks in `delay` s from now (announced on the next tick).
+   * Boss waves call this; also handy from the console: goofytd.game.queueBoss(0).
+   */
+  queueBoss(delay = this.cfg.bossDelay) {
+    if (this.spawners.length === 0) return false;
+    this.bossQueue.push({ t: delay, announced: false });
+    return true;
+  }
+
+  updateBossQueue(dt) {
+    const q = this.bossQueue;
+    for (let k = q.length - 1; k >= 0; k--) {
+      const b = q[k];
+      if (!b.announced) {
+        b.announced = true;
+        this.announce('boss', 'BOSS WAVE! The ground is shaking... BIG MAMA BESSIE wants her milk back!');
+      }
+      b.t -= dt;
+      if (b.t > 0) continue;
+      q.splice(k, 1);
+      this.spawnBoss();
+    }
+  }
+
+  /** Spawn a boss at a spawner now. Returns its slot (or -1). */
+  spawnBoss(type = COW_TYPES[BOSS_COW]) {
+    const s = this.spawners[Math.floor(this.bossRng() * this.spawners.length)];
+    const hp = type.hp * this.hpScale * (1 + this.cfg.bossHpGrowth * this.bossCount);
+    const i = this.spawnCow(type, s.x, s.z, hp, this.bossRng, 0);
+    if (i < 0) return i;
+    this.bossCount++;
+    const B = type.boss;
+    this.bosses.set(this.cows.id[i], {
+      type, no: this.bossCount, phase: 0,
+      stompCd: B.stomp.first, wallopCd: 0,
+      /** What she's doing ('stomp', 'wallop', 'bellow' or null), for actT more s of actLen. */
+      act: null, actT: 0, actLen: 0, target: 0,
+    });
+    this.events.push({ kind: 'bossspawn', id: this.cows.id[i], x: s.x, z: s.z, name: type.name });
+    this.tracked.set(this.cows.id[i], {
+      onKill: (game) => game.announce('boss', `${type.name} IS DOWN! The milk is safe... for now.`),
+      onEscape: (game) => game.announce('boss', `${type.name} chugged ${type.damage} milk and waddled off. Rude.`),
+    });
+    return i;
+  }
+
+  /**
+   * The boss at slot i: stomps, wallops and bellows. Returns true while she
+   * stands still (an attack winding up, or the tick it lands). Like cowAbility,
+   * holds tower ids (never slots) and never removes a cow; summoned cows are
+   * appended above i, so updateCows' backwards loop is safe.
+   */
+  bossAct(i, type, dt) {
+    const { cows } = this;
+    const b = this.bosses.get(cows.id[i]);
+    if (!b) return false;
+    const B = type.boss, x = cows.x[i], z = cows.z[i];
+    // Crossing a phase line interrupts whatever she was doing.
+    if (b.act !== 'bellow' && b.phase < B.summon.at.length && cows.hp[i] < B.summon.at[b.phase] * cows.maxHp[i]) {
+      b.phase++;
+      this.startBossAct(i, b, 'bellow', B.summon.bellow, 0);
+      this.announce('boss', b.phase === B.summon.at.length
+        ? 'MAMA IS ANGRY! She called for backup and she is NOT slowing down!'
+        : "MAMA'S BABIES! Big Mama Bessie is calling the herd!", x, z);
+      return true;
+    }
+    if (b.act) {
+      b.actT -= dt;
+      if (b.actT > 0) return true;
+      const act = b.act;
+      b.act = null;
+      if (act === 'bellow') this.bossSummon(b, x, z);
+      else if (act === 'stomp') {
+        this.bossStomp(b, x, z);
+        b.stompCd = this.bossAngry(i, type) ? B.stomp.angryCooldown : B.stomp.cooldown;
+      } else if (act === 'wallop') {
+        b.wallopCd = B.wallop.cooldown;
+        const t = this.towers.get(b.target);
+        if (t) { // sold or wrecked mid wind-up: a whiff
+          this.events.push({ kind: 'wallop', tower: t.id, x: t.x, z: t.z, cx: x, cz: z });
+          this.damageTower(t, B.wallop.damage);
+        }
+      }
+      return true;
+    }
+    b.stompCd -= dt;
+    b.wallopCd -= dt;
+    if (b.stompCd <= 0 && this.towerWithin(x, z, B.stomp.radius)) {
+      this.startBossAct(i, b, 'stomp', B.stomp.windup, 0);
+      return true;
+    }
+    if (b.wallopCd <= 0) {
+      const t = this.towerAt(x, z, type.radius + RAM_REACH);
+      if (t) {
+        this.startBossAct(i, b, 'wallop', B.wallop.windup, t.id);
+        const dx = t.x - x, dz = t.z - z, len = Math.sqrt(dx * dx + dz * dz) || 1;
+        cows.vx[i] = (dx / len) * 1e-3; // face the tower without moving
+        cows.vz[i] = (dz / len) * 1e-3;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  startBossAct(i, b, act, time, target) {
+    b.act = act;
+    b.actT = b.actLen = time;
+    b.target = target;
+    const { cows } = this;
+    this.events.push({ kind: 'bosswindup', act, id: cows.id[i], x: cows.x[i], z: cows.z[i], tower: target });
+  }
+
+  bossAngry(i, type) { return this.cows.hp[i] < type.enrageBelow * this.cows.maxHp[i]; }
+
+  /** True if any tower's footprint is within `reach` m of (x, z). Any distance (loops over every tower). */
+  towerWithin(x, z, reach) {
+    const r2 = reach * reach;
+    for (const t of this.towers.values()) if (boxDist2(t.aabb, x, z) <= r2) return true;
+    return false;
+  }
+
+  /** Hoof Stomp lands: every tower in reach is dented and stunned (stuns never stack, the longest wins). */
+  bossStomp(b, x, z) {
+    const S = b.type.boss.stomp, r2 = S.radius * S.radius;
+    const hit = [];
+    for (const t of this.towers.values()) if (boxDist2(t.aabb, x, z) <= r2) hit.push(t);
+    for (const t of hit) {
+      if (t.def.attack) t.stunT = Math.max(t.stunT, S.stun);
+      this.damageTower(t, S.damage);
+    }
+    this.events.push({ kind: 'stomp', x, z, radius: S.radius, hit: hit.length });
+  }
+
+  /** "MAMA'S BABIES!": cows of the summon type pop out around her at this wave's HP (one more per later boss). */
+  bossSummon(b, x, z) {
+    const sm = b.type.boss.summon, child = COW_TYPES[sm.type];
+    const hp = child.hp * this.hpScale;
+    let n = 0;
+    for (let k = 0; k < sm.count + (b.no - 1); k++) if (this.spawnCow(child, x, z, hp, this.bossRng, 3) >= 0) n++;
+    this.events.push({ kind: 'bellow', x, z, count: n, phase: b.phase });
+  }
+
+  /**
+   * The boss health bar: the first boss on the field, or null.
+   * { name, hp, maxHp, phase (0, 1, 2…), phases, angry, act, count (bosses alive) }.
+   */
+  bossStatus() {
+    if (this.bosses.size === 0) return null;
+    const { cows } = this;
+    let out = null;
+    for (const [id, b] of this.bosses) {
+      // Slots move (swap-remove), so look the cow up by id. Bosses are few.
+      let i = -1;
+      for (let k = 0; k < cows.count; k++) if (cows.id[k] === id) { i = k; break; }
+      if (i < 0) continue;
+      if (!out) {
+        out = {
+          name: b.type.name, hp: Math.max(0, cows.hp[i]), maxHp: cows.maxHp[i], phase: b.phase,
+          phases: b.type.boss.summon.at, angry: this.bossAngry(i, b.type), act: b.act, count: 0,
+        };
+      }
+      out.count++;
+    }
+    return out;
+  }
+
+  /** Forget bosses that died or reached the milk this tick. */
+  forgetBosses() {
+    if (this.bosses.size === 0) return;
+    for (const ev of this.events) if ((ev.kind === 'kill' || ev.kind === 'drink') && this.bosses.has(ev.id)) this.bosses.delete(ev.id);
+  }
 
   // ---- surprises ----------------------------------------------------------
 
@@ -358,6 +564,7 @@ export class Game {
       if (this.nextWaveIn <= 0) this.startWave();
     }
     this.updateSurprises(dt);
+    this.updateBossQueue(dt);
     if (this.spawnHold > 0) this.spawnHold -= dt;
     const mix = waveMix(this.wave);
     const hpScale = this.hpScale;
@@ -406,6 +613,7 @@ export class Game {
     this.updateProjectiles(dt);
     this.updateZones(dt);
     this.updateBurns(dt);
+    this.forgetBosses();
     this.watchTracked();
   }
 
@@ -426,8 +634,8 @@ export class Game {
         cows.remove(i);
         continue;
       }
-      // Headbutt Heifers and Cud Spitters stand still while they wind up and hit.
-      if (type.windup > 0 && this.cowAbility(i, type, dt)) {
+      // Headbutt Heifers, Cud Spitters and bosses stand still while they wind up and hit.
+      if ((type.boss ? this.bossAct(i, type, dt) : type.windup > 0 && this.cowAbility(i, type, dt))) {
         cows.px[i] = cows.x[i];
         cows.pz[i] = cows.z[i];
         if (cows.slowT[i] > 0) cows.slowT[i] -= dt;
@@ -604,7 +812,8 @@ export class Game {
     const { cows } = this;
     let n = 0;
     for (let i = 0; i < cows.count; i++) {
-      if (COW_TYPE_LIST[cows.type[i]].altitude > 0) continue;
+      const type = COW_TYPE_LIST[cows.type[i]];
+      if (type.altitude > 0 || type.boss) continue; // you can't tip MAMA
       cows.slowF[i] = 0;
       cows.slowT[i] = Math.max(cows.slowT[i], time);
       n++;
@@ -753,6 +962,8 @@ export class Game {
   /** Slow cow i to `factor` of its speed for `time` s. A weaker slow never overrides a stronger running one. */
   slowCow(i, factor, time) {
     const { cows } = this;
+    const resist = COW_TYPE_LIST[cows.type[i]].slowResist;
+    if (resist > 0) factor += (1 - factor) * resist;
     if (cows.slowT[i] <= 0 || factor <= cows.slowF[i]) {
       cows.slowF[i] = factor;
       if (time > cows.slowT[i]) cows.slowT[i] = time;

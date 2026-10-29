@@ -66,6 +66,17 @@ export class PlayerController {
     this.topSpeed = Math.max(this.topSpeed, horizontalSpeed(this.state));
   }
 
+  /**
+   * Thrown by something (Big Mama's Hoof Stomp): velocity becomes (vx, vy, vz)
+   * and the body leaves the ground. Local only, like the rest of the farmer.
+   */
+  knock(vx, vy, vz) {
+    const st = this.state;
+    st.velocity = new Vec3(vx, vy, vz);
+    st.grounded = false;
+    st.jumpedSinceGrounded = true;
+  }
+
   /** Eye position blended between the last two ticks; `alpha` in [0, 1]. */
   interpolatedEye(alpha) {
     const feet = this.prevPosition.lerp(this.state.position, alpha);

@@ -359,6 +359,21 @@ function startGame({ map, seed = newSeed(), session = null }) {
     if (coop && game.players > 1) say(`${game.players} farmers, one wallet: income ×${game.incomeMult}!`, 3500);
   }
 
+  // Big Mama's Hoof Stomp shakes the camera, and launches a farmer standing on the ground nearby.
+  let shake = 0;
+  function stompHit(e) {
+    const p = player.state.position;
+    const dx = p.x - e.x, dz = p.z - e.z, d = Math.hypot(dx, dz);
+    shake = Math.max(shake, Math.max(0.15, 1 - d / 60));
+    const reach = e.radius + 2;
+    if (d >= reach || !player.state.grounded) return;
+    // Up, and away from her: harder the closer you were. Air-strafe it into a long hop.
+    const k = 1 - d / reach, out = 4 + 6 * k;
+    const ux = d > 1e-6 ? dx / d : 0, uz = d > 1e-6 ? dz / d : 1;
+    player.knock(player.state.velocity.x + ux * out, 6 + 4 * k, player.state.velocity.z + uz * out);
+    say('BOING! Big Mama stomped you into orbit!', 2000);
+  }
+
   let last = performance.now();
   let lastPosSent = 0;
   let desyncShown = false;
@@ -398,6 +413,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
         if (e.kind === 'surprise') say(e.text, 3500);
         if (e.kind === 'interest') say(`Cheese Vault interest: +${e.amount} moolah`, 2500);
         if (e.kind === 'boom' && e.wrecked) say(`KABOOM! A Kaboom Cow blew up ${e.wrecked === 1 ? 'a tower' : `${e.wrecked} towers`}`, 2500);
+        if (e.kind === 'stomp') stompHit(e);
         if (e.kind === 'destroyed' && e.cause === 'bonk') say(`BONK! Your ${e.name} got headbutted to bits (+${e.refund} moolah insurance)`, 2500);
       }
     }
@@ -423,10 +439,17 @@ function startGame({ map, seed = newSeed(), session = null }) {
     }
 
     const eye = player.interpolatedEye(clock.alpha);
+    // The shake moves only the camera, never your aim for building.
+    let view = eye;
+    if (shake > 0) {
+      shake = Math.max(0, shake - frameDt * 1.8);
+      const a = shake * shake * 0.35;
+      view = eye.add(new Vec3((Math.random() - 0.5) * a, (Math.random() - 0.5) * a, (Math.random() - 0.5) * a));
+    }
     build.update(now, eye, player.yaw, player.pitch);
     upgrades.update(game);
     input.touch.syncGame(game, build, upgrades.isOpen);
-    renderer.setView(eye, player.yaw, player.pitch);
+    renderer.setView(view, player.yaw, player.pitch);
     td.update(simClock.alpha, frameDt, build); // culls against the view just set
     renderer.render();
     hud.update(now, frameDt, player, cfg, input, game, build);

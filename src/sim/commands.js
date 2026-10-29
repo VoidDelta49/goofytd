@@ -117,5 +117,6 @@ export function stateHash(game) {
   const c = game.cows;
   for (let i = 0; i < c.count; i++) { mix(c.x[i]); mix(c.z[i]); mix(c.hp[i]); mix(c.id[i]); }
   for (const t of game.towers.values()) { mix(t.id); mix(t.hp); mix(t.cooldown); }
+  for (const [id, b] of game.bosses) { mix(id); mix(b.phase); mix(b.actT); mix(b.stompCd); mix(b.wallopCd); }
   return h >>> 0;
 }
