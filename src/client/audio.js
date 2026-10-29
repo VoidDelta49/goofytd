@@ -1,8 +1,22 @@
-// Procedural sound effects. Every sound is synthesised with Web Audio the
-// moment it plays (oscillators, filtered noise, envelopes): no sample files,
-// nothing to download, nothing to license. Browser only; the simulation never
-// sees this. The sim reports what happened as events, `consume()` maps them to
-// sounds, and `play()` positions them relative to the listener.
+// Procedural sound effects. Every sound is synthesised with Web Audio (oscillators,
+// filtered noise, envelopes): no sample files, nothing to download, nothing to
+// license. Browser only; the simulation never sees this. The sim reports what
+// happened as events, `consume()` maps them to sounds, and `play()` positions
+// them relative to the listener.
+//
+// Threads. Building a sound live costs 8-20 Web Audio nodes: ~0.2 ms of main
+// thread each, and a saturated mix of them used about half the audio thread on
+// a desktop core (far more on a phone). So at load every sound is rendered once,
+// in several pitch variants, into a bank: one small OfflineAudioContext per
+// variant, rendered in parallel on the browser's own threads. Playback then
+// goes through the fastest engine available:
+//   worklet: one AudioWorkletNode (sfx-worklet.js) mixes every voice on the
+//            audio thread; the main thread posts a few numbers per frame.
+//   buffer:  no AudioWorklet (or not loaded yet): a buffer source, gain and
+//            panner per sound, all native.
+//   graph:   no bank yet (or no OfflineAudioContext, as in Node tests): the
+//            original live synthesis.
+// All three sound the same: the bank is rendered by the same synthesis code.
 //
 // Browsers keep audio locked until a user gesture, so the AudioContext is
 // created on the first pointer/key event. Until then play() is a no-op.
@@ -14,6 +28,12 @@ export const HEAR_RANGE = 70;
 const MAX_VOICES = 28;
 const MASTER_VOLUME = 0.9;
 const MUTE_KEY = 'goofytd.muted';
+/** Bank sample rate; the worklet resamples if the device runs at another rate. */
+export const BANK_RATE = 48000;
+/** Pre-rendered variants of a sound whose build() takes a pitch; others vary only their noise. */
+const PITCH_VARIANTS = 6;
+const PLAIN_VARIANTS = 2;
+const PITCH_MIN = 0.92, PITCH_SPAN = 0.16;
 
 const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
@@ -36,12 +56,18 @@ export function spatial(l, x, z) {
   return { gain: t * t, pan };
 }
 
+/** StereoPannerNode's equal-power law for a mono source: [left, right] gain at pan −1..1. */
+export function panGains(pan) {
+  const a = ((pan + 1) / 2) * (Math.PI / 2);
+  return [Math.cos(a), Math.sin(a)];
+}
+
 /**
  * Sound definitions. `gap`: minimum seconds between two of this sound (a
  * 40-tower defence would otherwise fire hundreds a second); `max`: how many
- * may overlap; `vol`: loudness before distance. `build(v, p, power)` adds the
- * layers: `p` is a random pitch factor ≈ 0.92–1.08 so repeats don't sound
- * identical, `power` is the strength passed to play().
+ * may overlap; `vol`: loudness before distance. `build(v, p)` adds the
+ * layers: `p` is a pitch factor ≈ 0.92–1.08 so repeats don't sound identical
+ * (each pre-rendered variant uses a different one).
  */
 const SOUNDS = {
   // Milk Squirter: a wet squirt.
@@ -240,9 +266,14 @@ const SOUNDS = {
 
 export const SOUND_NAMES = Object.keys(SOUNDS);
 
+/** How many bank variants a sound gets, and the pitch factor of variant k. */
+export const variantCount = (name) => (SOUNDS[name].build.length >= 2 ? PITCH_VARIANTS : PLAIN_VARIANTS);
+export const variantPitch = (name, k) => PITCH_MIN + (PITCH_SPAN * (k + 0.5)) / variantCount(name);
+
 /**
- * One playing sound: a bundle of oscillators and noise bursts feeding `dest`,
- * all scheduled up front relative to `t0`. Tracks when the last layer ends.
+ * One sound being built: a bundle of oscillators and noise bursts feeding
+ * `dest`, all scheduled up front relative to `t0`. Tracks when the last layer
+ * ends. With no context it only measures (`end`), building no nodes.
  */
 class Voice {
   constructor(ctx, dest, t0, noiseBuffer, rnd) {
@@ -278,8 +309,11 @@ class Voice {
    * opts: delay, attack, lowpass/bandpass (Hz or [Hz,…] sweep), q, vibrato [rateHz, depthHz].
    */
   tone(type, freqs, dur, vol, opts = {}) {
-    const { ctx } = this;
     const s = this.t0 + (opts.delay ?? 0);
+    const stop = s + dur + 0.03;
+    this.end = Math.max(this.end, stop);
+    const { ctx } = this;
+    if (!ctx) return;
     const osc = ctx.createOscillator();
     osc.type = type;
     this.curve(osc.frequency, freqs, s, dur);
@@ -294,7 +328,6 @@ class Voice {
       node = f;
     }
     node.connect(this.envelope(s, dur, vol, opts.attack ?? 0.004));
-    const stop = s + dur + 0.03;
     if (opts.vibrato) {
       const lfo = ctx.createOscillator();
       const depth = ctx.createGain();
@@ -307,13 +340,15 @@ class Voice {
     }
     osc.start(s);
     osc.stop(stop);
-    this.end = Math.max(this.end, stop);
   }
 
   /** Burst of white noise through a filter that sweeps over `cutoff` = [from Hz, to Hz]. */
   noise(dur, vol, filterType, cutoff, q, opts = {}) {
-    const { ctx } = this;
     const s = this.t0 + (opts.delay ?? 0);
+    const stop = s + dur + 0.03;
+    this.end = Math.max(this.end, stop);
+    const { ctx } = this;
+    if (!ctx) return;
     const src = ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
     src.loop = true;
@@ -323,11 +358,61 @@ class Voice {
     this.curve(f.frequency, cutoff, s, dur);
     src.connect(f);
     f.connect(this.envelope(s, dur, vol, opts.attack ?? 0.003));
-    const stop = s + dur + 0.03;
     src.start(s, this.rnd() * 0.5);
     src.stop(stop);
-    this.end = Math.max(this.end, stop);
   }
+}
+
+/** Seconds a sound lasts at pitch p (dry run, no nodes). */
+export const soundLength = (name, p = 1) => {
+  const v = new Voice(null, null, 0, null, null);
+  SOUNDS[name].build(v, p);
+  return v.end;
+};
+
+/** 1.5 s of seeded white noise, the source of every noise layer. */
+function noiseData(rate) {
+  const len = Math.floor(rate * 1.5);
+  const data = new Float32Array(len);
+  const r = mulberry32(1234);
+  for (let i = 0; i < len; i++) data[i] = r() * 2 - 1;
+  return data;
+}
+
+/**
+ * Render every sound variant to a mono Float32Array, one OfflineAudioContext
+ * each, `concurrency` at a time (each renders on its own browser thread).
+ * @param {(channels:number, length:number, rate:number) => OfflineAudioContext} offline
+ * @returns {Promise<{rate:number, data:Float32Array[][], seconds:number[][]}>} indexed [sound][variant]
+ */
+export async function buildBank(offline, rate = BANK_RATE, concurrency = 4) {
+  const noise = noiseData(rate);
+  const jobs = [];
+  const data = SOUND_NAMES.map((name, i) => {
+    const n = variantCount(name);
+    for (let k = 0; k < n; k++) jobs.push([i, k, name]);
+    return new Array(n);
+  });
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const [i, k, name] = jobs[next++];
+      const p = variantPitch(name, k);
+      const ctx = offline(1, Math.ceil(soundLength(name, p) * rate) + 1, rate);
+      const nb = ctx.createBuffer(1, noise.length, rate);
+      nb.copyToChannel(noise, 0);
+      SOUNDS[name].build(new Voice(ctx, ctx.destination, 0, nb, mulberry32(0x5eed + i * 97 + k)), p);
+      data[i][k] = (await ctx.startRendering()).getChannelData(0);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
+  return { rate, data, seconds: data.map((vs) => vs.map((d) => d.length / rate)) };
+}
+
+/** URL of the worklet module, versioned through the import map like every other module. */
+function workletUrl() {
+  try { return import.meta.resolve('./sfx-worklet.js'); } catch { /* old browser */ }
+  return new URL('./sfx-worklet.js', import.meta.url).href;
 }
 
 export class Sfx {
@@ -335,8 +420,10 @@ export class Sfx {
    * @param {object} [opts]
    * @param {BaseAudioContext} [opts.context] use this context instead of creating one on the first gesture (tests, offline rendering)
    * @param {Storage|null} [opts.storage] where the mute flag lives
+   * @param {'auto'|'buffer'|'graph'} [opts.engine] fastest available (default), or cap it (benchmarks)
+   * @param {Function|null} [opts.offline] OfflineAudioContext factory for the bank (default: the browser's; none in Node)
    */
-  constructor({ context = null, storage = globalThis.localStorage } = {}) {
+  constructor({ context = null, storage = globalThis.localStorage, engine = 'auto', offline } = {}) {
     this.ctx = null;
     this.master = null;
     this.noiseBuffer = null;
@@ -348,6 +435,21 @@ export class Sfx {
     this.muted = false;
     try { this.muted = storage?.getItem(MUTE_KEY) === '1'; } catch { /* blocked */ }
     this.injected = !!context;
+    this.engineCap = engine;
+    this.bank = null;        // {rate, data, seconds} once rendered
+    this.buffers = null;     // AudioBuffers of the bank, made on first buffer-engine play
+    this.node = null;        // AudioWorkletNode once loaded
+    this.pending = [];       // plays for the worklet, posted once per task
+    this.flushQueued = false;
+    this.workletPromise = null;
+
+    const AC = globalThis.OfflineAudioContext;
+    offline ??= AC ? (ch, len, rate) => new AC(ch, len, rate) : null;
+    const cores = globalThis.navigator?.hardwareConcurrency ?? 4;
+    this.bankPromise = engine !== 'graph' && offline
+      ? buildBank(offline, BANK_RATE, clamp(cores, 2, 8)).then((b) => { this.bank = b; this.upgrade(); }, () => {})
+      : Promise.resolve();
+
     if (context) {
       this.attach(context);
     } else if (typeof window !== 'undefined') {
@@ -357,6 +459,17 @@ export class Sfx {
       }
       document.addEventListener('visibilitychange', () => { if (!document.hidden) this.unlock(); });
     }
+  }
+
+  /** Which engine play() uses right now: 'worklet', 'buffer' or 'graph'. */
+  get engine() {
+    if (this.node) return 'worklet';
+    return this.bank ? 'buffer' : 'graph';
+  }
+
+  /** Resolves once the bank is rendered and (with a context) the worklet loaded or given up on. */
+  get ready() {
+    return this.bankPromise.then(() => this.workletPromise);
   }
 
   /** Create the context on first call (needs a user gesture), resume it if the browser suspended it. */
@@ -384,11 +497,27 @@ export class Sfx {
     comp.release.value = 0.15;
     this.master.connect(comp);
     comp.connect(ctx.destination);
-    const len = Math.floor(ctx.sampleRate * 1.5);
-    this.noiseBuffer = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = this.noiseBuffer.getChannelData(0);
-    const r = mulberry32(1234);
-    for (let i = 0; i < len; i++) data[i] = r() * 2 - 1;
+    const noise = noiseData(ctx.sampleRate);
+    this.noiseBuffer = ctx.createBuffer(1, noise.length, ctx.sampleRate);
+    this.noiseBuffer.getChannelData(0).set(noise);
+    this.upgrade();
+  }
+
+  /** Once both the context and the bank exist, try to move mixing onto the audio thread. */
+  upgrade() {
+    if (this.workletPromise || !this.ctx || !this.bank || this.engineCap !== 'auto') return;
+    if (!this.ctx.audioWorklet || typeof AudioWorkletNode === 'undefined') return;
+    this.workletUrl = workletUrl();
+    this.workletPromise = this.ctx.audioWorklet.addModule(this.workletUrl).then(() => {
+      const node = new AudioWorkletNode(this.ctx, 'goofytd-sfx', {
+        numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2],
+      });
+      node.connect(this.master);
+      // The audio thread owns the samples from here on; the buffer engine is never used again.
+      const data = this.bank.data;
+      node.port.postMessage({ bank: data, rate: this.bank.rate }, data.flat().map((d) => d.buffer));
+      this.node = node;
+    }).catch(() => { /* stay on the buffer engine */ });
   }
 
   /** Where the player is and which way they face (horizontal view direction). Call once per frame. */
@@ -434,21 +563,68 @@ export class Sfx {
     const mine = (this.live[name] ??= []);
     if (mine.length >= def.max || total >= MAX_VOICES) return false;
 
-    const out = ctx.createGain();
-    out.gain.value = def.vol * gain * power;
-    if (ctx.createStereoPanner) {
-      const panner = ctx.createStereoPanner();
+    const amp = def.vol * gain * power;
+    let end;
+    if (this.bank) {
+      const i = SOUND_NAMES.indexOf(name);
+      const v = Math.floor(this.rnd() * variantCount(name));
+      end = t0 + this.bank.seconds[i][v];
+      if (this.node) this.queue(i, v, t0, amp, pan);
+      else this.playBuffer(i, v, t0, amp, pan);
+    } else {
+      const voice = new Voice(ctx, this.channel(amp, pan), t0, this.noiseBuffer, this.rnd);
+      def.build(voice, PITCH_MIN + this.rnd() * PITCH_SPAN);
+      end = voice.end;
+    }
+    mine.push(end);
+    this.last[name] = t0;
+    return true;
+  }
+
+  /** Gain (and stereo panner where supported) into the master: one per buffer or graph voice. */
+  channel(amp, pan) {
+    const out = this.ctx.createGain();
+    out.gain.value = amp;
+    if (this.ctx.createStereoPanner) {
+      const panner = this.ctx.createStereoPanner();
       panner.pan.value = pan;
       out.connect(panner);
       panner.connect(this.master);
     } else {
       out.connect(this.master);
     }
-    const voice = new Voice(ctx, out, t0, this.noiseBuffer, this.rnd);
-    def.build(voice, 0.92 + this.rnd() * 0.16, power);
-    mine.push(voice.end);
-    this.last[name] = t0;
-    return true;
+    return out;
+  }
+
+  playBuffer(i, v, t0, amp, pan) {
+    const ctx = this.ctx;
+    this.buffers ??= this.bank.data.map((vs) => vs.map((d) => {
+      const b = ctx.createBuffer(1, d.length, this.bank.rate);
+      b.copyToChannel(d, 0);
+      return b;
+    }));
+    const src = ctx.createBufferSource();
+    src.buffer = this.buffers[i][v];
+    src.connect(this.channel(amp, pan));
+    src.start(t0);
+  }
+
+  /** Worklet engine: batch this task's plays into one message to the audio thread. */
+  queue(i, v, t0, amp, pan) {
+    const [l, r] = panGains(pan);
+    this.pending.push(i, v, t0, amp * l, amp * r);
+    if (!this.flushQueued) {
+      this.flushQueued = true;
+      queueMicrotask(() => this.flush());
+    }
+  }
+
+  flush() {
+    this.flushQueued = false;
+    if (!this.pending.length || !this.node) return;
+    const play = Float64Array.from(this.pending);
+    this.pending.length = 0;
+    this.node.port.postMessage({ play }, [play.buffer]);
   }
 
   /** Turn one tick's simulation events into sounds. Call after every Game.tick (it clears them). */
