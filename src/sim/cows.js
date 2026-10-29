@@ -286,6 +286,8 @@ export class CowPool {
     this.capacity = capacity;
     this.count = 0;
     this.nextId = 1;
+    /** Bumped whenever slots or positions change (spawn, remove, clear, a movement step), for caches like CowHash. */
+    this.version = 0;
     /** [array, spawn] per field, for spawn/remove. */
     this.columns = COW_FIELDS.map((f) => {
       const a = new f.array(capacity);
@@ -299,6 +301,7 @@ export class CowPool {
   spawn(type, x, z, offsetX, offsetZ) {
     if (this.count >= this.capacity) return -1;
     const i = this.count++;
+    this.version++;
     const at = this.at;
     at.x = x; at.z = z; at.offsetX = offsetX; at.offsetZ = offsetZ; at.id = this.nextId++;
     for (const [a, spawn] of this.columns) a[i] = typeof spawn === 'function' ? spawn(type, at) : spawn;
@@ -306,10 +309,11 @@ export class CowPool {
   }
 
   remove(i) {
+    this.version++;
     const last = --this.count;
     if (i === last) return;
     for (const [a] of this.columns) a[i] = a[last];
   }
 
-  clear() { this.count = 0; }
+  clear() { this.count = 0; this.version++; }
 }
