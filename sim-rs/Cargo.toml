@@ -1,0 +1,15 @@
+[package]
+name = "cowtd_sim"
+version = "0.1.0"
+edition = "2021"
+description = "CowTD simulation core, compiled to WebAssembly. No dependencies, no wasm-bindgen: the JS glue is hand-written in src/sim/wasm/."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

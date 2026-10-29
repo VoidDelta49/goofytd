@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, assert } from './harness.js';
-import { ROOT, expectedImports, moduleFiles, readImportMap } from '../tools/stamp.js';
+import { ROOT, WASM_VERSION_FILE, expectedImports, moduleFiles, readImportMap, wasmVersionJs } from '../tools/stamp.js';
 
 test('cache: index.html import map versions every module with its content hash (run `node tools/stamp.js`)', () => {
   const html = readFileSync(join(ROOT, 'index.html'), 'utf8');
@@ -22,4 +22,9 @@ test('cache: the page loads main.js through the import map, not a bare script sr
   // <script src> bypasses import maps, so main.js itself would never get its version.
   assert(!/<script[^>]+src=["'][^"']*main\.js/.test(html), 'main.js loaded with src=, which skips the version');
   assert(/import\s+['"]\.\/src\/main\.js['"]/.test(html), 'no `import "./src/main.js"` entry script');
+});
+
+test('cache: version.js carries the current sim.wasm hash (run `node tools/stamp.js`)', () => {
+  assert(readFileSync(join(ROOT, WASM_VERSION_FILE), 'utf8') === wasmVersionJs(ROOT),
+    'sim.wasm changed (or appeared/vanished) without restamping; run `node tools/stamp.js`');
 });

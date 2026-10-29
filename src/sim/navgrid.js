@@ -4,6 +4,12 @@
 // One flow field for all cows is what keeps thousands of cows cheap: pathing
 // costs one Dijkstra over the grid when a tower is placed or sold, and then
 // each cow per tick is one array lookup. Pure: no three.js, no DOM.
+//
+// `rebuild` and `reachableWith` also exist in Rust (sim-rs/src/navgrid.rs).
+// When sim.wasm is built, NavGrid is the WASM-backed grid: the same arrays,
+// but living in WASM memory. Both versions must give bit-identical results.
+
+import { wasm } from './wasm/sim-wasm.js';
 
 const SQRT2 = Math.SQRT2;
 // 8 neighbours: dx, dz, step cost. Orthogonals first.
@@ -17,7 +23,7 @@ const BLOCK_MIN_HEIGHT = 0.05;
 /** Cows are about this tall: geometry whose bottom is above it (a high bridge) doesn't block them. */
 const COW_HEIGHT = 2;
 
-export class NavGrid {
+export class JsNavGrid {
   /**
    * @param {{minX:number,minZ:number,maxX:number,maxZ:number}} bounds walkable floor area
    * @param {number} cell cell size in metres
@@ -28,7 +34,12 @@ export class NavGrid {
     this.originZ = bounds.minZ;
     this.w = Math.floor((bounds.maxX - bounds.minX) / cell);
     this.h = Math.floor((bounds.maxZ - bounds.minZ) / cell);
-    const n = this.w * this.h;
+    /** Bumped whenever walkability changes; lets callers cache placement checks. */
+    this.version = 0;
+    this.alloc(this.w * this.h);
+  }
+
+  alloc(n) {
     /** 1 = static level geometry (milk included). */
     this.solid = new Uint8Array(n);
     /** Tower id occupying the cell, or 0. */
@@ -39,8 +50,6 @@ export class NavGrid {
     this.dist = new Float64Array(n).fill(Infinity);
     /** Neighbour to walk to next, or -1 (goal, blocked or unreachable). */
     this.next = new Int32Array(n).fill(-1);
-    /** Bumped whenever walkability changes; lets callers cache placement checks. */
-    this.version = 0;
     this.heap = new MinHeap(n);
     this.queue = new Int32Array(n);
     this.seen = new Uint8Array(n);
@@ -164,6 +173,66 @@ export class NavGrid {
     return true;
   }
 }
+
+/**
+ * Same grid, arrays in WASM memory, rebuild/flood in Rust. Views are
+ * re-made whenever WASM memory grows (growing detaches the old buffer),
+ * so read the arrays through the getters, not a long-lived local.
+ */
+class WasmNavGrid extends JsNavGrid {
+  alloc() {
+    this.ptr = wasm.nav_new(this.w, this.h, this.cell);
+    this.buf = null;
+    freeGrid.register(this, this.ptr);
+  }
+
+  views() {
+    const buf = wasm.memory.buffer;
+    if (buf !== this.buf) {
+      const n = this.w * this.h, p = (k) => wasm.nav_ptr(this.ptr, k);
+      this.buf = buf;
+      this.v = {
+        solid: new Uint8Array(buf, p(0), n),
+        tower: new Int32Array(buf, p(1), n),
+        goal: new Uint8Array(buf, p(2), n),
+        dist: new Float64Array(buf, p(3), n),
+        next: new Int32Array(buf, p(4), n),
+        extra: new Uint8Array(buf, p(5), n),
+        seen: new Uint8Array(buf, p(6), n),
+      };
+    }
+    return this.v;
+  }
+
+  get solid() { return this.views().solid; }
+  get tower() { return this.views().tower; }
+  get goal() { return this.views().goal; }
+  get dist() { return this.views().dist; }
+  get next() { return this.views().next; }
+  get extra() { return this.views().extra; }
+  get seen() { return this.views().seen; }
+
+  rebuild() {
+    wasm.nav_rebuild(this.ptr);
+    this.version++;
+  }
+
+  reachableWith(blocked, mustReach) {
+    const { extra } = this.views();
+    for (const i of blocked) extra[i] = 1;
+    wasm.nav_flood(this.ptr);
+    const { seen } = this.views();
+    for (const i of blocked) extra[i] = 0;
+    for (const i of mustReach) if (!seen[i]) return false;
+    return true;
+  }
+}
+
+const freeGrid = wasm ? new FinalizationRegistry((ptr) => wasm.nav_free(ptr)) : null;
+
+/** The grid the sim uses: Rust-backed when sim.wasm loaded, JS otherwise. */
+export const NavGrid = wasm ? WasmNavGrid : JsNavGrid;
+export const navBackend = wasm ? 'wasm' : 'js';
 
 /** Binary min-heap of cell indices keyed by distance. Allocation-free after construction. */
 class MinHeap {
