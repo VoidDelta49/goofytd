@@ -52,4 +52,25 @@ export class CowHash {
     for (let c = 0; c < w * this.h; c++) { start[c + 1] += start[c]; fill[c] = start[c]; }
     for (let i = 0; i < n; i++) slots[fill[cellOf[i]]++] = i;
   }
+
+  /**
+   * Slots of every cow whose hash cell overlaps the square of half-size
+   * `reach` around (x, z): a superset of the cows within `reach`. Callers
+   * still test the exact shape. Sorted high-to-low (`descending`, the order
+   * the old backwards scans hit cows in) or low-to-high. A fresh array, so
+   * a kill that triggers another query mid-loop (a flambé) can't clobber it.
+   */
+  near(cows, x, z, reach, descending = true) {
+    this.update(cows);
+    const { start, slots, w } = this;
+    const x0 = this.cx(x - reach), x1 = this.cx(x + reach);
+    const z0 = this.cz(z - reach), z1 = this.cz(z + reach);
+    const out = [];
+    for (let cz = z0; cz <= z1; cz++) {
+      for (let c = cz * w + x0, end = cz * w + x1; c <= end; c++) {
+        for (let k = start[c], e = start[c + 1]; k < e; k++) out.push(slots[k]);
+      }
+    }
+    return out.sort(descending ? (a, b) => b - a : (a, b) => a - b);
+  }
 }

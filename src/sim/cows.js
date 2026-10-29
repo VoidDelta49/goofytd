@@ -202,6 +202,9 @@ defineCow({
   splitInto: 'mama', splitCount: 3, weight: 0,
 });
 
+/** Widest cow (m), so area queries can pad their reach by it. */
+export const MAX_COW_RADIUS = () => COW_TYPE_LIST.reduce((m, t) => Math.max(m, t.radius), 0);
+
 for (const t of COW_TYPE_LIST) {
   if (t.boss && !COW_TYPES[t.boss.summon.type]) throw new Error(`cow type ${t.id}: summons unknown ${t.boss.summon.type}`);
   if (t.splitInto && !COW_TYPES[t.splitInto]) throw new Error(`cow type ${t.id}: splits into unknown ${t.splitInto}`);

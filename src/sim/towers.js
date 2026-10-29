@@ -10,7 +10,7 @@
 // Pure: no three.js, no DOM. Functions get (game, tower, ...) so they can
 // use the game's grid, cows, RNG and event list.
 
-import { COW_TYPE_LIST } from './cows.js';
+import { COW_TYPE_LIST, MAX_COW_RADIUS } from './cows.js';
 
 /**
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
@@ -150,7 +150,9 @@ export const ATTACKS = {
     const r2 = def.range * def.range;
     hitScratch.length = 0;
     hitScratch.push(i);
-    for (let k = cows.count - 1; k >= 0 && hitScratch.length < def.maxHits; k--) {
+    const near = game.cowHash.near(cows, t.x, t.z, def.range);
+    for (let n = 0; n < near.length && hitScratch.length < def.maxHits; n++) {
+      const k = near[n];
       if (k === i) continue;
       if (!def.hitsAir && COW_TYPE_LIST[cows.type[k]].altitude > 0) continue;
       const dx = cows.x[k] - t.x, dz = cows.z[k] - t.z;
@@ -172,7 +174,7 @@ export const ATTACKS = {
     const { cows } = game;
     const def = t.def;
     hitScratch.length = 0;
-    for (let k = cows.count - 1; k >= 0; k--) {
+    for (const k of game.cowHash.near(cows, t.x, t.z, def.range + MAX_COW_RADIUS())) {
       const type = COW_TYPE_LIST[cows.type[k]];
       if (!def.hitsAir && type.altitude > 0) continue;
       const r = def.range + type.radius;
@@ -202,7 +204,9 @@ export const ATTACKS = {
     const r2 = range * range;
     hitScratch.length = 0;
     hitScratch.push(i);
-    for (let k = cows.count - 1; k >= 0 && hitScratch.length < def.maxHits; k--) {
+    const near = game.cowHash.near(cows, t.x, t.z, range);
+    for (let n = 0; n < near.length && hitScratch.length < def.maxHits; n++) {
+      const k = near[n];
       if (k === i) continue;
       if (!def.hitsAir && COW_TYPE_LIST[cows.type[k]].altitude > 0) continue;
       const dx = cows.x[k] - t.x, dz = cows.z[k] - t.z;
@@ -256,7 +260,9 @@ export const ATTACKS = {
     const range = def.range * (game.sight ?? 1);
     hitScratch.length = 0;
     hitScratch.push(i);
-    for (let k = cows.count - 1; k >= 0 && hitScratch.length < def.maxHits; k--) {
+    const near = game.cowHash.near(cows, t.x, t.z, range + def.beamWidth + MAX_COW_RADIUS());
+    for (let n = 0; n < near.length && hitScratch.length < def.maxHits; n++) {
+      const k = near[n];
       if (k === i) continue;
       const type = COW_TYPE_LIST[cows.type[k]];
       const dx = cows.x[k] - t.x, dz = cows.z[k] - t.z;
