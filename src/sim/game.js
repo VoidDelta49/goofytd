@@ -6,6 +6,7 @@
 import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
+import { CowHash } from './cowhash.js';
 import { ABILITY_COOLDOWN, ABILITY_WINDUP, CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, WRECK_REFUND, REPAIR_DELAY, REPAIR_RATE, TOWER_TYPES, TOWER_FORMS, towerMaxHp } from './towers.js';
 import { mulberry32 } from './rng.js';
@@ -117,6 +118,8 @@ export class Game {
     this.milkZ = m ? (m.min.z + m.max.z) / 2 : 0;
     this.spawners = (level.spawners ?? []).map((s) => ({ x: s.x, z: s.z, cell: this.grid.cellAt(s.x, s.z), queue: 0, timer: 0 }));
     this.cows = new CowPool(cfg.maxCows);
+    /** Cows bucketed by position, so tower targeting only scans nearby cells. */
+    this.cowHash = new CowHash(this.grid);
     // Auto-upgrade is a farm setting, not part of a run: restarting keeps it.
     /** When on, tick() buys towers' next upgrades by itself (see updateAutoUpgrade). */
     this.autoUpgrade = false;
@@ -667,6 +670,7 @@ export class Game {
         this.explodeCow(i, type);
       }
     }
+    cows.version++; // positions moved: spatial caches rebuild
     if (this.milk <= 0) {
       this.milk = 0;
       this.lost = true;

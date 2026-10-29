@@ -34,8 +34,41 @@ function dist2(cows, i, x, z) {
   return dx * dx + dz * dz;
 }
 
-/** Highest score in range wins; ties go to the lower slot (deterministic). */
+/**
+ * Highest score in range wins; ties go to the lower slot (deterministic),
+ * exactly as a scan of every cow would pick. Only cows in the spatial-hash
+ * cells the range covers are looked at.
+ */
 function pick(game, t, score) {
+  const { cows, cowHash: hash } = game;
+  const def = t.def;
+  const range = def.range * (game.sight ?? 1);
+  const r2 = range * range, m2 = def.minRange * def.minRange;
+  hash.update(cows);
+  const { start, slots, w } = hash;
+  const x0 = hash.cx(t.x - range), x1 = hash.cx(t.x + range);
+  const z0 = hash.cz(t.z - range), z1 = hash.cz(t.z + range);
+  let best = -1, bestScore = -Infinity;
+  for (let cz = z0; cz <= z1; cz++) {
+    for (let cx = x0; cx <= x1; cx++) {
+      const c = cz * w + cx;
+      for (let k = start[c], end = start[c + 1]; k < end; k++) {
+        const i = slots[k];
+        const type = COW_TYPE_LIST[cows.type[i]];
+        if (!def.hitsAir && type.altitude > 0) continue;
+        const d2 = dist2(cows, i, t.x, t.z);
+        if (d2 > r2 || d2 < m2) continue;
+        if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close (scopes see it)
+        const s = score(i);
+        if (s > bestScore || (s === bestScore && best >= 0 && i < best)) { bestScore = s; best = i; }
+      }
+    }
+  }
+  return best;
+}
+
+/** The old full scan, kept as the reference the spatial-hash pick must match (tests). */
+export function pickBruteForce(game, t, score) {
   const { cows } = game;
   const def = t.def;
   const range = def.range * (game.sight ?? 1);
@@ -46,12 +79,14 @@ function pick(game, t, score) {
     if (!def.hitsAir && type.altitude > 0) continue;
     const d2 = dist2(cows, i, t.x, t.z);
     if (d2 > r2 || d2 < m2) continue;
-    if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close (scopes see it)
+    if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue;
     const s = score(i);
     if (s > bestScore) { bestScore = s; best = i; }
   }
   return best;
 }
+
+export { pick as pickTarget };
 
 function shotEvent(game, t, i, extra) {
   const { cows } = game;

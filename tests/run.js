@@ -17,6 +17,7 @@ import './cull.test.js';
 import './auto.test.js';
 import './speed.test.js';
 import './navgrid.test.js';
+import './cowhash.test.js';
 import './stamp.test.js'; // Node only: reads index.html and the sources
 import { runAll } from './harness.js';
 
