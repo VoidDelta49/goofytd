@@ -6,6 +6,8 @@ import { Surface } from '../level.js';
 import { viewQuaternion } from './look.js';
 
 const SKY = 0x9ec7f2;
+/** The camera's far plane never goes past this (m), whatever the fog does. */
+const MAX_FAR = 500;
 
 const SURFACE_STYLE = {
   [Surface.Floor]: { color: 0x8c9e80, roughness: 0.95 },
@@ -32,7 +34,7 @@ export class Renderer {
     this.scene.fog = new THREE.Fog(SKY, 60, 220);
 
     // Vertical FOV 70° is ~102° horizontal at 16:9.
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 500);
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, MAX_FAR);
 
     this.scene.add(new THREE.HemisphereLight(0xdfefff, 0x6b5f4f, 1.2));
     this.sun = new THREE.DirectionalLight(0xfff4e0, 2.2);
@@ -51,16 +53,23 @@ export class Renderer {
     window.addEventListener('resize', () => this.resize());
   }
 
+  /**
+   * One mesh per surface type: every block of a surface merged into a single
+   * geometry (they share a material), so the level costs one draw per surface
+   * instead of one per block.
+   */
   buildLevel(level) {
     const grid = gridTexture(this.renderer.capabilities.getMaxAnisotropy());
-    const materials = {};
-    for (const [surface, style] of Object.entries(SURFACE_STYLE)) {
-      materials[surface] = new THREE.MeshStandardMaterial({ ...style, map: grid });
-    }
+    const bySurface = new Map();
     for (const { aabb, surface } of level.blocks) {
-      const mesh = new THREE.Mesh(boxGeometry(aabb), materials[surface]);
+      if (!bySurface.has(surface)) bySurface.set(surface, []);
+      bySurface.get(surface).push(aabb);
+    }
+    for (const [surface, boxes] of bySurface) {
+      const mesh = new THREE.Mesh(boxesGeometry(boxes), new THREE.MeshStandardMaterial({ ...SURFACE_STYLE[surface], map: grid }));
       mesh.castShadow = surface !== Surface.Floor;
       mesh.receiveShadow = true;
+      mesh.matrixAutoUpdate = false;
       this.scene.add(mesh);
     }
   }
@@ -74,12 +83,17 @@ export class Renderer {
     this.camera.updateProjectionMatrix();
   }
 
-  /** @param {{x:number,y:number,z:number}} eye @param {number} yaw @param {number} pitch */
-  render(eye, yaw, pitch) {
+  /**
+   * Pose the camera (and the shadow frustum) for this frame. Call before
+   * TdRenderer.update, which culls against it.
+   * @param {{x:number,y:number,z:number}} eye @param {number} yaw @param {number} pitch
+   */
+  setView(eye, yaw, pitch) {
     this.camera.position.set(eye.x, eye.y, eye.z);
     // Orientation straight from the view angles as a quaternion: no Euler
     // order to get wrong and no roll.
     this.camera.quaternion.set(...viewQuaternion(yaw, pitch));
+    this.camera.updateMatrixWorld();
 
     // Keep the shadow frustum centred on the player, snapped to a texel-sized
     // world grid to reduce shadow-edge crawl while moving. (Not exact: the
@@ -88,17 +102,34 @@ export class Renderer {
     const cx = snap(eye.x), cz = snap(eye.z);
     this.sun.target.position.set(cx, 0, cz);
     this.sun.position.set(cx + this.sunOffset.x, this.sunOffset.y, cz + this.sunOffset.z);
+  }
 
+  /**
+   * Pull the far plane in to where the fog is total. Fog and far plane both
+   * use view depth, and past fog.far a pixel is exactly the fog colour (which
+   * is the sky colour), so clipping there changes no pixel and culls
+   * everything the fog has swallowed: most of the field in the War Moo-st.
+   */
+  fitFar() {
+    const far = this.scene.fog ? Math.min(MAX_FAR, this.scene.fog.far + 1) : MAX_FAR;
+    if (far !== this.camera.far) {
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+  }
+
+  render() {
+    this.fitFar();
     this.renderer.render(this.scene, this.camera);
   }
 }
 
 /**
  * Box geometry whose UVs are world-space coordinates in metres, so the grid
- * texture tiles at a constant 1 m scale on every face of every block.
+ * texture tiles at a constant 1 m scale on every face of every block. Many
+ * boxes go into one geometry.
  */
-function boxGeometry(aabb) {
-  const { min, max } = aabb;
+function boxesGeometry(aabbs) {
   // [normal, u axis, v axis] per face; u × v = normal for CCW winding.
   const faces = [
     [[1, 0, 0], [0, 0, -1], [0, 1, 0]],
@@ -108,18 +139,20 @@ function boxGeometry(aabb) {
     [[0, 0, 1], [1, 0, 0], [0, 1, 0]],
     [[0, 0, -1], [-1, 0, 0], [0, 1, 0]],
   ];
-  const c = [(min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2];
-  const h = [(max.x - min.x) / 2, (max.y - min.y) / 2, (max.z - min.z) / 2];
   const pos = [], nrm = [], uv = [], idx = [];
-  for (const [n, u, v] of faces) {
-    const base = pos.length / 3;
-    for (const [su, sv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-      const p = [0, 1, 2].map((i) => c[i] + (n[i] + u[i] * su + v[i] * sv) * h[i]);
-      pos.push(...p);
-      nrm.push(...n);
-      uv.push(p[0] * u[0] + p[1] * u[1] + p[2] * u[2], p[0] * v[0] + p[1] * v[1] + p[2] * v[2]);
+  for (const { min, max } of aabbs) {
+    const c = [(min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2];
+    const h = [(max.x - min.x) / 2, (max.y - min.y) / 2, (max.z - min.z) / 2];
+    for (const [n, u, v] of faces) {
+      const base = pos.length / 3;
+      for (const [su, sv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const p = [0, 1, 2].map((i) => c[i] + (n[i] + u[i] * su + v[i] * sv) * h[i]);
+        pos.push(...p);
+        nrm.push(...n);
+        uv.push(p[0] * u[0] + p[1] * u[1] + p[2] * u[2], p[0] * v[0] + p[1] * v[1] + p[2] * v[2]);
+      }
+      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     }
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

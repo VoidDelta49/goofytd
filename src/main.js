@@ -69,7 +69,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
   const isHost = sync.role !== 'client';
   const player = new PlayerController(level.spawn, level.spawnYaw, cfg);
   const renderer = new Renderer(canvas, level);
-  const td = new TdRenderer(renderer.scene, game);
+  const td = new TdRenderer(renderer.scene, game, renderer);
   const farmers = new FarmerRenderer(renderer.scene);
   const build = new BuildController(game, player, cfg);
   build.others = () => farmers.boxes();
@@ -362,8 +362,9 @@ function startGame({ map, seed = newSeed(), session = null }) {
     build.update(now, eye, player.yaw, player.pitch);
     upgrades.update(game);
     input.touch.syncGame(game, build, upgrades.isOpen);
-    td.update(clock.alpha, frameDt, build);
-    renderer.render(eye, player.yaw, player.pitch);
+    renderer.setView(eye, player.yaw, player.pitch);
+    td.update(clock.alpha, frameDt, build); // culls against the view just set
+    renderer.render();
     hud.update(now, frameDt, player, cfg, input, game, build);
     requestAnimationFrame(frame);
   }

@@ -14,52 +14,89 @@ const STRAW = 0xe6c15a;
 const WOOD = 0x8a5a2b;
 const STEEL = 0xb8bec6;
 
-const mats = new Map();
-function mat(color) {
-  if (!mats.has(color)) mats.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.85 }));
-  return mats.get(color);
-}
+/**
+ * One rigid piece (a leg, an arm, the head, the body) is one mesh: its boxes
+ * and cylinders merged into a single geometry with vertex colours, all
+ * sharing one material per farmer. The shirt's plaid lives in the left of a
+ * small atlas and everything else samples its white strip, so plain and
+ * plaid parts can share that material. A farmer is 6 draws plus its name tag,
+ * instead of 28.
+ */
+const ATLAS_PLAID = 64; // two 32 px plaid tiles across and down, like repeat(2, 2) used to
+const ATLAS_W = 72; // plus an 8 px white strip
+const WHITE_U = (ATLAS_PLAID + 4) / ATLAS_W;
+const SHIRT = -1; // colour marker: textured with the plaid
 
 function box(w, h, d, color, x = 0, y = 0, z = 0) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color));
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  return m;
+  return { geo: new THREE.BoxGeometry(w, h, d), color, x, y, z };
 }
 
 function cyl(rTop, rBottom, h, color, x = 0, y = 0, z = 0, seg = 16) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBottom, h, seg), mat(color));
-  m.position.set(x, y, z);
-  m.castShadow = true;
-  return m;
+  return { geo: new THREE.CylinderGeometry(rTop, rBottom, h, seg), color, x, y, z };
 }
 
-/** A pivot group at (x, y, z) so a limb swings from its top. */
-function joint(x, y, z, ...children) {
-  const g = new THREE.Group();
-  g.position.set(x, y, z);
-  g.add(...children);
+/** Merge parts ({geo, color, x, y, z}) into one geometry: position, normal, uv (into the atlas), colour. */
+function mergeParts(parts) {
+  const pos = [], nrm = [], uv = [], col = [], idx = [];
+  const c = new THREE.Color();
+  for (const { geo, color, x, y, z } of parts) {
+    const p = geo.attributes.position, n = geo.attributes.normal, t = geo.attributes.uv;
+    const base = pos.length / 3;
+    if (color === SHIRT) c.setRGB(1, 1, 1); else c.setHex(color);
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i) + x, p.getY(i) + y, p.getZ(i) + z);
+      nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+      if (color === SHIRT) uv.push(t.getX(i) * ATLAS_PLAID / ATLAS_W, t.getY(i));
+      else uv.push(WHITE_U, 0.5);
+      col.push(c.r, c.g, c.b);
+    }
+    for (const i of geo.index.array) idx.push(base + i);
+    geo.dispose();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
   return g;
 }
 
-/** Slightly darker stripes over the shirt colour: the plaid. */
-function plaidTexture(color) {
+/** A pivot group at (x, y, z) holding one merged mesh, so a limb swings from its top. */
+function joint(material, x, y, z, ...parts) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  const m = new THREE.Mesh(mergeParts(parts), material);
+  m.castShadow = true;
+  g.add(m);
+  return g;
+}
+
+/** The plaid (slightly darker stripes over the shirt colour), tiled 2×2, beside a white strip. */
+function atlasTexture(color) {
   const c = document.createElement('canvas');
-  c.width = c.height = 32;
+  c.width = ATLAS_W;
+  c.height = ATLAS_PLAID;
   const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, ATLAS_W, ATLAS_PLAID);
   const base = new THREE.Color(color);
-  g.fillStyle = `#${base.getHexString()}`;
-  g.fillRect(0, 0, 32, 32);
-  g.fillStyle = `#${base.clone().multiplyScalar(0.55).getHexString()}`;
-  g.globalAlpha = 0.6;
-  g.fillRect(0, 10, 32, 5); g.fillRect(10, 0, 5, 32);
-  g.globalAlpha = 0.35;
-  g.fillRect(0, 24, 32, 2); g.fillRect(24, 0, 2, 32);
+  for (const ox of [0, 32]) for (const oy of [0, 32]) {
+    g.globalAlpha = 1;
+    g.fillStyle = `#${base.getHexString()}`;
+    g.fillRect(ox, oy, 32, 32);
+    g.fillStyle = `#${base.clone().multiplyScalar(0.55).getHexString()}`;
+    g.globalAlpha = 0.6;
+    g.fillRect(ox, oy + 10, 32, 5); g.fillRect(ox + 10, oy, 5, 32);
+    g.globalAlpha = 0.35;
+    g.fillRect(ox, oy + 24, 32, 2); g.fillRect(ox + 24, oy, 2, 32);
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.magFilter = THREE.NearestFilter;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(2, 2);
+  // No mipmaps: they would bleed the white strip into the plaid's edge.
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
   return tex;
 }
 
@@ -89,42 +126,38 @@ function nameTag(name, color) {
 /** Build one farmer. Origin at the feet, facing -Z (yaw 0), 1.8 m tall like the player hull. */
 export function buildFarmer(name, colorIndex) {
   const color = FARMER_COLORS[colorIndex] ?? FARMER_COLORS[0];
-  const shirt = new THREE.MeshStandardMaterial({ map: plaidTexture(color), roughness: 0.9 });
+  const mat = new THREE.MeshStandardMaterial({ map: atlasTexture(color), vertexColors: true, roughness: 0.85 });
   const root = new THREE.Group();
   const body = new THREE.Group(); // squashes when crouching, bobs when walking
   root.add(body);
 
-  const leg = (x) => joint(x, 0.86, 0,
+  const leg = (x) => joint(mat, x, 0.86, 0,
     box(0.2, 0.72, 0.22, DENIM, 0, -0.38, 0),
     box(0.22, 0.14, 0.32, BOOT, 0, -0.79, -0.04));
   const legL = leg(-0.13), legR = leg(0.13);
 
-  const torso = box(0.52, 0.36, 0.3, DENIM, 0, 1.02, 0); // overall trousers' top
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.34, 0.3), shirt);
-  chest.position.set(0, 1.37, 0);
-  chest.castShadow = true;
-  const bib = box(0.34, 0.3, 0.02, DENIM, 0, 1.3, -0.16);
-  const strapL = box(0.06, 0.24, 0.02, DENIM, -0.14, 1.5, -0.16);
-  const strapR = box(0.06, 0.24, 0.02, DENIM, 0.14, 1.5, -0.16);
-  const buttonL = box(0.04, 0.04, 0.02, STRAW, -0.14, 1.42, -0.175);
-  const buttonR = box(0.04, 0.04, 0.02, STRAW, 0.14, 1.42, -0.175);
+  const trunk = joint(mat, 0, 0, 0,
+    box(0.52, 0.36, 0.3, DENIM, 0, 1.02, 0), // overall trousers' top
+    box(0.52, 0.34, 0.3, SHIRT, 0, 1.37, 0), // chest
+    box(0.34, 0.3, 0.02, DENIM, 0, 1.3, -0.16), // bib
+    box(0.06, 0.24, 0.02, DENIM, -0.14, 1.5, -0.16), // straps
+    box(0.06, 0.24, 0.02, DENIM, 0.14, 1.5, -0.16),
+    box(0.04, 0.04, 0.02, STRAW, -0.14, 1.42, -0.175), // buttons
+    box(0.04, 0.04, 0.02, STRAW, 0.14, 1.42, -0.175));
 
-  const arm = (x) => {
-    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.5, 0.18), shirt);
-    sleeve.position.set(0, -0.24, 0);
-    sleeve.castShadow = true;
-    return joint(x, 1.52, 0, sleeve, box(0.13, 0.13, 0.13, SKIN, 0, -0.55, 0));
-  };
-  const armL = arm(-0.35), armR = arm(0.35);
-  // Pitchfork in the right hand, held upright.
-  const fork = new THREE.Group();
-  fork.position.set(0, -0.56, -0.05);
-  fork.add(cyl(0.025, 0.025, 1.5, WOOD, 0, 0.2, 0, 6));
-  fork.add(box(0.26, 0.04, 0.04, STEEL, 0, 0.95, 0));
-  for (const x of [-0.11, 0, 0.11]) fork.add(box(0.03, 0.26, 0.03, STEEL, x, 1.1, 0));
-  armR.add(fork);
+  const arm = (x, ...extra) => joint(mat, x, 1.52, 0,
+    box(0.16, 0.5, 0.18, SHIRT, 0, -0.24, 0), // sleeve
+    box(0.13, 0.13, 0.13, SKIN, 0, -0.55, 0), // hand
+    ...extra);
+  const armL = arm(-0.35);
+  // Pitchfork in the right hand, held upright (its origin at (0, -0.56, -0.05) in the arm).
+  const fx = 0, fy = -0.56, fz = -0.05;
+  const armR = arm(0.35,
+    cyl(0.025, 0.025, 1.5, WOOD, fx, fy + 0.2, fz, 6),
+    box(0.26, 0.04, 0.04, STEEL, fx, fy + 0.95, fz),
+    ...[-0.11, 0, 0.11].map((x) => box(0.03, 0.26, 0.03, STEEL, fx + x, fy + 1.1, fz)));
 
-  const head = joint(0, 1.56, 0,
+  const head = joint(mat, 0, 1.56, 0,
     box(0.32, 0.32, 0.3, SKIN, 0, 0.17, 0),
     box(0.05, 0.05, 0.02, 0x1a1a1a, -0.08, 0.2, -0.155),
     box(0.05, 0.05, 0.02, 0x1a1a1a, 0.08, 0.2, -0.155),
@@ -134,7 +167,7 @@ export function buildFarmer(name, colorIndex) {
     cyl(0.18, 0.21, 0.2, STRAW, 0, 0.46, 0, 16), // crown
     cyl(0.215, 0.215, 0.05, color, 0, 0.39, 0, 16)); // hat band in their colour
 
-  body.add(legL, legR, torso, chest, bib, strapL, strapR, buttonL, buttonR, armL, armR, head);
+  body.add(legL, legR, trunk, armL, armR, head);
 
   const tag = nameTag(name, color);
   tag.position.y = 2.35;
