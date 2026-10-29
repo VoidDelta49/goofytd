@@ -10,6 +10,7 @@ import './surprises.test.js';
 import './variants.test.js';
 import './retaliation.test.js';
 import './newtowers.test.js';
+import './coop.test.js';
 import './stamp.test.js'; // Node only: reads index.html and the sources
 import { runAll } from './harness.js';
 

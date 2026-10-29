@@ -13,10 +13,12 @@
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
         "./src/client/audio.js": "./src/client/audio.js?v=5b06b70cc3",
-        "./src/client/build.js": "./src/client/build.js?v=a43dbf97b5",
-        "./src/client/hud.js": "./src/client/hud.js?v=8496fd56d5",
+        "./src/client/build.js": "./src/client/build.js?v=aa882b37a4",
+        "./src/client/farmers.js": "./src/client/farmers.js?v=0a939f6821",
+        "./src/client/hud.js": "./src/client/hud.js?v=f7ae6b2b53",
         "./src/client/input.js": "./src/client/input.js?v=7ee3472989",
         "./src/client/look.js": "./src/client/look.js?v=1ffecd34f8",
+        "./src/client/main-menu.js": "./src/client/main-menu.js?v=12bd6a365b",
         "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
         "./src/client/render.js": "./src/client/render.js?v=b3d15c77e4",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
@@ -25,15 +27,21 @@
         "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=31164aaee0",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=e0a83db8f7",
+        "./src/main.js": "./src/main.js?v=f30373d68b",
+        "./src/net/lockstep.js": "./src/net/lockstep.js?v=ad417f39ba",
+        "./src/net/peer.js": "./src/net/peer.js?v=64bccb7003",
+        "./src/net/session.js": "./src/net/session.js?v=dbd36605c3",
+        "./src/net/signal.js": "./src/net/signal.js?v=28bdd77224",
+        "./src/net/track.js": "./src/net/track.js?v=cb2074a155",
         "./src/player.js": "./src/player.js?v=7536aa98e4",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
+        "./src/sim/commands.js": "./src/sim/commands.js?v=65a9a152bb",
         "./src/sim/cows.js": "./src/sim/cows.js?v=e8bb8c30d1",
-        "./src/sim/game.js": "./src/sim/game.js?v=fce098e6c3",
+        "./src/sim/game.js": "./src/sim/game.js?v=a48a536b15",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
-        "./src/sim/surprises.js": "./src/sim/surprises.js?v=2c1c5cfc50",
+        "./src/sim/surprises.js": "./src/sim/surprises.js?v=bf8adff917",
         "./src/sim/towers.js": "./src/sim/towers.js?v=a3ee8fb330",
         "./src/sim/vec3.js": "./src/sim/vec3.js?v=0643c68bb6"
       }
@@ -423,6 +431,74 @@
       #hud .milk { width: 140px; }
       #hud [data-hud=buildbar] .slot kbd { display: none; }
     }
+    /* ---- Main menu: title screen, then the LAN co-op lobby screens. ---- */
+    #mainmenu {
+      position: fixed; inset: 0; z-index: 20; overflow-y: auto; touch-action: pan-y; box-sizing: border-box;
+      /* margin: auto on the card (not place-items) so a tall card scrolls instead of losing its top. */
+      display: flex; padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+      background:
+        radial-gradient(ellipse 120% 40% at 50% 108%, #5f9e4a 0 60%, transparent 61%),
+        radial-gradient(ellipse 90% 30% at 15% 100%, #79b25c 0 60%, transparent 61%),
+        linear-gradient(#7fb5ea, #b9dbf5 70%, #d9ecf7);
+      font: 500 15px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #fff;
+    }
+    #mainmenu[hidden] { display: none; }
+    #mainmenu .mm-card {
+      box-sizing: border-box; width: min(460px, 100%); margin: auto; padding: 22px 20px 18px; border-radius: 20px;
+      background: #15151dee; border: 3px solid #ffd84d; box-shadow: 0 10px 0 #0003, 0 0 0 6px #fff2;
+      display: grid; gap: 12px;
+    }
+    #mainmenu h1 {
+      margin: 0; text-align: center; font-size: clamp(40px, 12vw, 64px); line-height: 1; letter-spacing: 2px;
+      color: #fff; text-shadow: 4px 4px 0 #2a2a2a, -2px -2px 0 #2a2a2a, 2px -2px 0 #2a2a2a, -2px 2px 0 #2a2a2a;
+      transform: rotate(-3deg);
+    }
+    #mainmenu h1 span { color: #ffd84d; }
+    #mainmenu .mm-tag { margin: -4px 0 4px; text-align: center; opacity: 0.85; }
+    #mainmenu h2 { margin: 0; font-size: 20px; letter-spacing: 3px; color: #ffd84d; text-align: center; }
+    #mainmenu section { display: grid; gap: 10px; }
+    #mainmenu [hidden] { display: none !important; } /* beats .mm-step / .mm-copy display rules */
+    #mainmenu button {
+      min-height: 46px; padding: 8px 12px; border-radius: 12px; border: 2px solid #fff6; background: #fff1; color: #fff;
+      font: 700 15px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 1px; cursor: pointer;
+      touch-action: manipulation;
+    }
+    #mainmenu button:hover, #mainmenu button:focus-visible { background: #fff3; outline: none; }
+    #mainmenu button:active { transform: translateY(2px); }
+    #mainmenu button:disabled { opacity: 0.4; cursor: default; transform: none; }
+    #mainmenu .primary { border-color: #ffd84d; color: #1a1a1a; background: #ffd84d; font-size: 18px; min-height: 54px; }
+    #mainmenu .primary:hover { background: #ffe27a; }
+    #mainmenu .mm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    #mainmenu label { display: grid; gap: 4px; font-size: 12px; letter-spacing: 2px; opacity: 0.9; }
+    #mainmenu input, #mainmenu textarea {
+      width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 10px; border: 2px solid #fff4; background: #0006; color: #fff;
+      font: 500 15px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; user-select: text; -webkit-user-select: text; touch-action: auto;
+    }
+    #mainmenu textarea { height: 64px; resize: none; font-size: 11px; word-break: break-all; }
+    #mainmenu input:focus, #mainmenu textarea:focus { border-color: #ffd84d; outline: none; }
+    #mainmenu .mm-small { margin: 0; font-size: 12px; opacity: 0.75; text-align: center; }
+    #mainmenu .mm-step { display: grid; gap: 6px; padding: 10px; border-radius: 12px; background: #fff1; }
+    #mainmenu .mm-step b { color: #ffd84d; }
+    #mainmenu .mm-copy { display: flex; gap: 8px; }
+    #mainmenu .mm-copy button { flex: 1; min-height: 38px; font-size: 13px; } /* COPY fills the row where SHARE isn't offered */
+    #mainmenu .mm-status { margin: 0; min-height: 1.4em; text-align: center; font-size: 13px; }
+    #mainmenu .mm-status.bad { color: #ff9a8a; }
+    #mainmenu .mm-status.good { color: #9be38a; }
+    #mainmenu ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+    #mainmenu li { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: #fff1; }
+    #mainmenu li i { width: 14px; height: 14px; border-radius: 4px; flex: none; box-shadow: inset 0 0 0 2px #0004; }
+    #mainmenu li small { margin-left: auto; opacity: 0.7; }
+    #mainmenu li.empty { opacity: 0.45; font-style: italic; }
+    @media (max-height: 520px) {
+      #mainmenu .mm-card { width: min(620px, 100%); padding: 12px 14px; gap: 8px; }
+      #mainmenu h1 { font-size: 36px; }
+      #mainmenu .mm-tag { display: none; }
+      #mainmenu ol { grid-template-columns: 1fr 1fr; }
+      #mainmenu button { min-height: 40px; }
+      #mainmenu .primary { min-height: 46px; }
+    }
+    #pause .note { grid-column: 1 / -1; margin: 0; text-align: center; font-size: 12px; color: #ffd84d; }
+    #pause .note[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -481,7 +557,57 @@
       <button data-menu="fullscreen">FULLSCREEN</button>
       <button data-menu="respawn" title="Back to the start position">RESPAWN</button>
       <button class="wide danger" data-menu="restart">RESTART GAME</button>
+      <button class="wide" data-menu="mainMenu">MAIN MENU</button>
+      <p class="note" data-menu="coopNote" hidden>Co-op: the cows don't stop while you're in this menu</p>
       <div class="keys desk-only">Press P to resume</div>
+    </div>
+  </div>
+  <div id="mainmenu" hidden>
+    <div class="mm-card">
+      <h1>COW<span>TD</span></h1>
+      <p class="mm-tag">Defend the milk. From cows.</p>
+      <section data-screen="home">
+        <label>FARMER NAME <input data-mm="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
+        <button class="primary" data-mm="solo">SINGLEPLAYER</button>
+        <div class="mm-row">
+          <button data-mm="host">HOST LAN CO-OP</button>
+          <button data-mm="join">JOIN LAN CO-OP</button>
+        </div>
+        <button data-mm="playground">MOVEMENT PLAYGROUND</button>
+        <p class="mm-small">Co-op: up to 4 farmers on the same Wi-Fi share one wallet, and every extra farmer adds +50% to all income.</p>
+      </section>
+      <section data-screen="host" hidden>
+        <h2>HOSTING</h2>
+        <ol data-mm="players"></ol>
+        <div class="mm-step" data-mm="inviteBox" hidden>
+          <div><b>1.</b> Send this invite link to a farmer on your Wi-Fi:</div>
+          <textarea data-mm="inviteOut" readonly></textarea>
+          <div class="mm-copy"><button data-mm="copyInvite">COPY</button><button data-mm="shareInvite">SHARE</button></div>
+          <div><b>2.</b> Paste the reply code they send back:</div>
+          <textarea data-mm="replyIn" placeholder="MOO1a…"></textarea>
+          <button data-mm="connect">CONNECT</button>
+        </div>
+        <button data-mm="invite" hidden>+ INVITE ANOTHER FARMER</button>
+        <p class="mm-status" data-mm="hostStatus"></p>
+        <button class="primary" data-mm="start">START GAME</button>
+        <button data-mm="back">BACK</button>
+      </section>
+      <section data-screen="join" hidden>
+        <h2>JOINING</h2>
+        <div class="mm-step" data-mm="inviteInBox">
+          <div><b>1.</b> Paste the host's invite (link or code):</div>
+          <textarea data-mm="inviteIn" placeholder="MOO1o… or the invite link"></textarea>
+          <button data-mm="makeReply">MAKE REPLY CODE</button>
+        </div>
+        <div class="mm-step" data-mm="replyBox" hidden>
+          <div><b>2.</b> Send this reply code back to the host:</div>
+          <textarea data-mm="replyOut" readonly></textarea>
+          <div class="mm-copy"><button data-mm="copyReply">COPY</button><button data-mm="shareReply">SHARE</button></div>
+        </div>
+        <ol data-mm="joinPlayers" hidden></ol>
+        <p class="mm-status" data-mm="joinStatus"></p>
+        <button data-mm="back">BACK</button>
+      </section>
     </div>
   </div>
   <!-- Through the import map (not src=) so main.js gets its ?v= content version too: see tools/stamp.js. -->

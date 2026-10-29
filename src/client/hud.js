@@ -98,7 +98,8 @@ export class Hud {
       : game.wave === 0 ? 'N: start' : game.spawning ? 'incoming' : game.cows.count ? 'mooing' : 'N: next wave';
     setText(this.tdEl,
       `milk ${Math.ceil(game.milk)} · moolah ${game.money}\n` +
-      `wave ${game.wave} (${next}) · cows ${game.cows.count} · kills ${game.kills}`);
+      `wave ${game.wave} (${next}) · cows ${game.cows.count} · kills ${game.kills}` +
+      (game.players > 1 ? `\nfarmers ${game.players} · income ×${game.incomeMult}` : ''));
 
     let place = '';
     if (build.message && now < build.messageUntil) place = build.message;

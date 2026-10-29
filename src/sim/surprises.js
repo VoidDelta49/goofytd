@@ -78,7 +78,7 @@ defineSurprise({
       { at: 0, say: `A CASH COW is loose! Catch it for ${prize} moolah!` },
       {
         at: 0.3, spawn: 'golden', count: 1, from: 'random', hp: 1,
-        onKill: (game) => { game.money += prize; game.announce('cashcow', `Cash cow cashed: +${prize} moolah!`); },
+        onKill: (game) => { game.announce('cashcow', `Cash cow cashed: +${game.earn(prize)} moolah!`); },
         onEscape: (game) => game.announce('cashcow', 'The Cash Cow got away. Rich cow now.'),
       },
     ];
@@ -131,7 +131,7 @@ defineSurprise({
 defineSurprise({
   id: 'wallet', name: 'Moolah Drop', firstWave: 2, weight: 1,
   script: ({ wave }) => [
-    { at: 0, say: `A farmer dropped their wallet. +${30 + 8 * wave} moolah!`, call: (game) => { game.money += 30 + 8 * wave; } },
+    { at: 0, call: (game) => { game.announce('wallet', `A farmer dropped their wallet. +${game.earn(30 + 8 * wave)} moolah!`); } },
   ],
 });
 
@@ -161,8 +161,7 @@ defineSurprise({
           game.milk += Math.min(milk, room);
           game.announce('milkman', `The milkman dropped by: +${Math.min(milk, room)} milk!`);
         } else {
-          game.money += cash;
-          game.announce('milkman', `The milkman found your tank full and tipped you ${cash} moolah.`);
+          game.announce('milkman', `The milkman found your tank full and tipped you ${game.earn(cash)} moolah.`);
         }
       },
     }];

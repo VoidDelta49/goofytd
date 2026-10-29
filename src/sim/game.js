@@ -41,6 +41,10 @@ export function defaultGameConfig() {
     doubleSurpriseWave: 8,
     doubleSurpriseChance: 0.25,
     maxCows: 4096,
+    /** Farmers sharing this match (LAN co-op). Everyone spends from one shared wallet. */
+    players: 1,
+    /** Each extra farmer adds this much to every bounty, wave bonus and cash surprise (and the starting moolah). */
+    coopIncome: 0.5,
   };
 }
 
@@ -112,7 +116,8 @@ export class Game {
     this.zones = [];
     /** Things that happened this tick, for effects and sounds. The client drains it. */
     this.events = [];
-    this.money = this.cfg.startMoney;
+    this.players = Math.max(1, this.cfg.players | 0);
+    this.money = Math.round(this.cfg.startMoney * this.incomeMult);
     this.milk = this.cfg.milk;
     this.lost = false;
     this.wave = 0;
@@ -148,6 +153,16 @@ export class Game {
     this.sight = 1;
   }
 
+  /** Co-op: income × this (1 alone, 1.5 with two farmers, 2 with three, 2.5 with four). */
+  get incomeMult() { return 1 + this.cfg.coopIncome * (this.players - 1); }
+
+  /** Pay out income (bounties, wave bonus, cash surprises), scaled by the co-op multiplier. Refunds don't go through here. */
+  earn(amount) {
+    const paid = Math.round(amount * this.incomeMult);
+    this.money += paid;
+    return paid;
+  }
+
   /** HP multiplier for cows spawned this wave. */
   get hpScale() { return 1 + this.cfg.hpPerWave * Math.max(0, this.wave - 1); }
 
@@ -161,7 +176,7 @@ export class Game {
     this.spawners.forEach((s, k) => {
       s.queue += Math.floor(total / this.spawners.length) + (k < total % this.spawners.length ? 1 : 0);
     });
-    this.money += this.cfg.waveBonus;
+    this.earn(this.cfg.waveBonus);
     this.payInterest();
     this.nextWaveIn = null;
     this.spawnHold = 0;
@@ -754,7 +769,7 @@ export class Game {
     const x = cows.x[i], z = cows.z[i];
     // An Auction Barn nearby sells the cow for more (the best barn in reach; whole moolah only).
     const mult = this.bankMult(x, z);
-    this.money += Math.round(type.bounty * this.bountyMult * mult);
+    this.earn(type.bounty * this.bountyMult * mult);
     this.kills++;
     if (tower) tower.kills++;
     this.events.push({ kind: 'kill', x, z, id: cows.id[i], mult });

@@ -12,6 +12,8 @@ import { rotateByQuaternion, viewQuaternion } from './look.js';
 export const BUILD_REACH = 24;
 /** How far you can look at a tower to sell it. */
 export const SELL_REACH = 12;
+/** Shown instead of building on top of a co-op partner. */
+export const FARMER_IN_THE_WAY = 'another farmer is standing there';
 /** Re-run the placement check this often even if nothing obvious changed: cows walk into footprints. */
 const RECHECK_MS = 120;
 
@@ -48,6 +50,8 @@ export class BuildController {
     this.messageUntil = 0;
     this.cacheKey = '';
     this.cacheAt = 0;
+    /** Boxes of the other farmers in co-op ({min, max}); set by main.js. */
+    this.others = () => [];
   }
 
   get typeIds() { return Object.keys(TOWER_TYPES); }
@@ -89,33 +93,44 @@ export class BuildController {
     if (key !== this.cacheKey || now - this.cacheAt > RECHECK_MS) {
       this.cacheKey = key;
       this.cacheAt = now;
-      this.preview = this.game.checkPlacement(this.selected, aim.x, aim.z, this.playerBox());
+      this.preview = this.check(this.selected, aim.x, aim.z);
       this.aim = aim;
     }
   }
 
-  /** Build the previewed tower. */
+  /**
+   * The command that builds the previewed tower, or null (with the reason shown)
+   * if it can't go there. The build itself happens when the command runs, at the
+   * start of the next tick on every machine (sim/commands.js).
+   */
   place(now = performance.now()) {
-    if (this.selected === null || !this.aim) return false;
-    const r = this.game.placeTower(this.selected, this.aim.x, this.aim.z, this.playerBox());
+    if (this.selected === null || !this.aim) return null;
+    const p = this.check(this.selected, this.aim.x, this.aim.z);
     this.cacheKey = '';
-    if (r.reason) { this.say(`Can't build: ${r.reason}`, now); return false; }
-    return true;
+    if (!p.ok) { this.say(`Can't build: ${p.reason}`, now); return null; }
+    return { k: 'place', type: this.selected, x: this.aim.x, z: this.aim.z };
   }
 
-  sell(now = performance.now()) {
-    if (!this.lookTower) return false;
-    const name = this.lookTower.def.name;
-    const refund = this.game.sellTower(this.lookTower.id);
+  /** The command that sells the tower under the crosshair, or null. */
+  sell() {
+    if (!this.lookTower) return null;
+    const c = { k: 'sell', id: this.lookTower.id };
     this.lookTower = null;
     this.cacheKey = '';
-    this.say(`Sold ${name} for ${refund}`, now);
-    return true;
+    return c;
   }
 
-  /** Touch PLACE button: build when building, otherwise sell what you look at. */
-  placeOrSell(now = performance.now()) {
-    return this.selected !== null ? this.place(now) : this.sell(now);
+  /**
+   * Placement check including every farmer: yours (the sim checks it) and the
+   * others, which aren't in the shared sim, so only the builder can check them.
+   */
+  check(typeId, x, z) {
+    const p = this.game.checkPlacement(typeId, x, z, this.playerBox());
+    if (p.ok && this.others().some((b) => p.aabb.overlaps(b))) {
+      p.ok = false;
+      p.reason = FARMER_IN_THE_WAY;
+    }
+    return p;
   }
 
   say(text, now) {
