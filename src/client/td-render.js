@@ -10,7 +10,7 @@
 // never drawn.
 
 import * as THREE from 'three';
-import { COW_TYPE_LIST } from '../sim/cows.js';
+import { ABILITY_WINDUP, COW_TYPE_LIST } from '../sim/cows.js';
 import { TOWER_FORMS } from '../sim/towers.js';
 import { TowerBatch, EffectPool, boxesGeometry, uploadRange } from './batch.js';
 import { frustumPlanes, sphereVisible, shadowedSphere, composeYXZ } from './cull.js';
@@ -352,8 +352,8 @@ export class TdRenderer {
     let n = 0, wings = 0;
     this.bossCount = 0;
     for (let i = 0; i < c.count; i++) {
-      const x = c.px[i] + (c.x[i] - c.px[i]) * alpha;
-      const z = c.pz[i] + (c.z[i] - c.pz[i]) * alpha;
+      const x = c.prevX[i] + (c.x[i] - c.prevX[i]) * alpha;
+      const z = c.prevZ[i] + (c.z[i] - c.prevZ[i]) * alpha;
       const ti = c.type[i];
       const type = COW_TYPE_LIST[ti];
       const s0 = type.scale;
@@ -368,13 +368,13 @@ export class TdRenderer {
         // Flyers bob slowly up and down instead of waddling.
         y = type.altitude + Math.sin(ph * 0.4) * 0.3;
         rx = 0; ry = Math.atan2(-c.vx[i], -c.vz[i]); rz = 0;
-      } else if (c.slowT[i] > 0 && c.slowF[i] === 0) {
+      } else if (c.slowTime[i] > 0 && c.slowMult[i] === 0) {
         // Tipped over: lying on its side, legs in the air, until it gets up.
         y = 0.45 * s0;
         rx = 0; ry = (c.id[i] * 2.39) % (2 * Math.PI); rz = Math.PI / 2;
-      } else if (c.abilS[i] === 1) {
+      } else if (c.abilityState[i] === ABILITY_WINDUP) {
         // Winding up: a Heifer rears back (nose up, shaking); a Spitter puffs its cheeks.
-        const k = 1 - Math.max(0, c.abilT[i]) / type.windup;
+        const k = 1 - Math.max(0, c.abilityTime[i]) / type.windup;
         ry = Math.atan2(-c.vx[i], -c.vz[i]);
         if (type.ramDamage > 0) {
           y = 0.1 * k;
@@ -391,7 +391,7 @@ export class TdRenderer {
         // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
         rx = 0; ry = Math.atan2(-c.vx[i], -c.vz[i]); rz = Math.sin(mad ? ph * 2.5 : ph) * rock;
       }
-      const s = s0 * (c.abilS[i] === 1 && type.spitRange > 0 ? 1 + 0.2 * (1 - Math.max(0, c.abilT[i]) / type.windup) : 1);
+      const s = s0 * (c.abilityState[i] === ABILITY_WINDUP && type.spitRange > 0 ? 1 + 0.2 * (1 - Math.max(0, c.abilityTime[i]) / type.windup) : 1);
       composeYXZ(mat, n * 16, x, y, z, rx, ry, rz, s);
       if (type.altitude > 0 && wings + 2 <= maxWings) {
         const cm = this.cowMatrix.fromArray(mat, n * 16);
@@ -408,10 +408,10 @@ export class TdRenderer {
       if (type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i]) col.lerp(this.rage, 0.6);
       if (type.healRate > 0) col.lerp(this.healGlow, 0.25 + 0.25 * Math.sin(this.time * 6 + c.id[i]));
       if (type.camo > 0) col.multiplyScalar(0.55 + 0.25 * Math.sin(this.time * 3 + c.id[i])); // shimmer in and out
-      if (c.chillT[i] > 0) col.lerp(this.ice, 0.55); // brain-frozen: icy blue
-      else if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
-      if (c.burnT[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1)); // simmering
-      if (c.abilS[i] === 1 && type.spitRange > 0) col.lerp(this.spitGlow, 0.5 + 0.3 * Math.sin(this.time * 20));
+      if (c.chillTime[i] > 0) col.lerp(this.ice, 0.55); // brain-frozen: icy blue
+      else if (c.slowTime[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
+      if (c.burnTime[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1)); // simmering
+      if (c.abilityState[i] === ABILITY_WINDUP && type.spitRange > 0) col.lerp(this.spitGlow, 0.5 + 0.3 * Math.sin(this.time * 20));
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       colArr[n * 3] = col.r; colArr[n * 3 + 1] = col.g; colArr[n * 3 + 2] = col.b;
       n++;
@@ -471,9 +471,9 @@ export class TdRenderer {
     this.wingTmp.multiplyMatrices(body, this.wingLocal).toArray(this.bossArms.instanceMatrix.array, k * 16);
     const col = this.tmpColor.copy(this.typeColors[c.type[i]]);
     if (angry) col.lerp(this.rage, 0.35 + 0.15 * Math.sin(this.time * 9));
-    if (c.chillT[i] > 0) col.lerp(this.ice, 0.55);
-    else if (c.slowT[i] > 0) col.lerp(this.goo, 0.45);
-    if (c.burnT[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1));
+    if (c.chillTime[i] > 0) col.lerp(this.ice, 0.55);
+    else if (c.slowTime[i] > 0) col.lerp(this.goo, 0.45);
+    if (c.burnTime[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1));
     col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
     for (const bm of [this.bossMesh, this.bossArms]) {
       const a = bm.instanceColor.array;

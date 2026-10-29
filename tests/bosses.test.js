@@ -20,8 +20,8 @@ function fieldGame(over = {}) {
 /** Spawn the boss and stand her at (x, z). Returns her cow id. */
 function bossAt(g, x, z) {
   const i = g.spawnBoss();
-  g.cows.x[i] = g.cows.px[i] = x;
-  g.cows.z[i] = g.cows.pz[i] = z;
+  g.cows.x[i] = g.cows.prevX[i] = x;
+  g.cows.z[i] = g.cows.prevZ[i] = z;
   return g.cows.id[i];
 }
 
@@ -157,9 +157,9 @@ test("bosses: you can't tip Mama, slows only half-work on her, and she leaves th
   const id = bossAt(g, 0, -60);
   g.tipCows(3);
   const i = slotOf(g, id);
-  assert(!(g.cows.slowT[i] > 0 && g.cows.slowF[i] === 0), 'tipped');
+  assert(!(g.cows.slowTime[i] > 0 && g.cows.slowMult[i] === 0), 'tipped');
   g.slowCow(i, 0.4, 1);
-  assertClose(g.cows.slowF[i], 0.4 + 0.6 * MAMA.slowResist, 1e-12, 'slow resist');
+  assertClose(g.cows.slowMult[i], 0.4 + 0.6 * MAMA.slowResist, 1e-12, 'slow resist');
   g.tick(DT);
   const j = slotOf(g, id);
   g.events.length = 0;

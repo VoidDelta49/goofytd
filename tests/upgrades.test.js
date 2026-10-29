@@ -21,8 +21,8 @@ function fieldGame(over = {}) {
 /** Spawn a cow exactly at (x, z): spawnCow jitters by ±spawnSpread/2. Returns the slot. */
 function put(g, type, x, z, hp) {
   const i = g.spawnCow(type, x, z, hp);
-  g.cows.x[i] = g.cows.px[i] = x;
-  g.cows.z[i] = g.cows.pz[i] = z;
+  g.cows.x[i] = g.cows.prevX[i] = x;
+  g.cows.z[i] = g.cows.prevZ[i] = z;
   return i;
 }
 
@@ -150,8 +150,8 @@ test('upgrades: the Moo-shotgun hits every cow in its cone (up to its cap) and n
   const t2 = buildForm(g2, 'shotgun', 31, 31);
   for (let k = 0; k < 20; k++) {
     const i = g2.spawnCow(COW_TYPES.cow, 0, 0, hp);
-    g2.cows.x[i] = g2.cows.px[i] = t2.x - 4 - (k % 5) * 0.5;
-    g2.cows.z[i] = g2.cows.pz[i] = t2.z - 1 + Math.floor(k / 5) * 0.5;
+    g2.cows.x[i] = g2.cows.prevX[i] = t2.x - 4 - (k % 5) * 0.5;
+    g2.cows.z[i] = g2.cows.prevZ[i] = t2.z - 1 + Math.floor(k / 5) * 0.5;
   }
   g2.tick(DT);
   let hit = 0;
@@ -187,11 +187,11 @@ test('upgrades: slows halve a cow\'s speed, and Molasses Bales apply them', () =
   const t = buildForm(g2, 'goo', 31, 31);
   put(g2, COW_TYPES.cow, t.x + 2.5, t.z, 1000);
   g2.tick(DT);
-  assert(g2.cows.slowT[0] > 0 && g2.cows.slowF[0] === t.def.slow, 'molasses did not slow');
+  assert(g2.cows.slowTime[0] > 0 && g2.cows.slowMult[0] === t.def.slow, 'molasses did not slow');
   assert(g2.cows.hp[0] === 1000, 'molasses should not hurt');
   // A weaker slow never overrides a stronger running one.
   g2.slowCow(0, 0.9, 5);
-  assert(g2.cows.slowF[0] === t.def.slow, 'weaker slow won');
+  assert(g2.cows.slowMult[0] === t.def.slow, 'weaker slow won');
 });
 
 test('upgrades: Butter Slick leaves a puddle; overlapping puddles don\'t stack', () => {
@@ -205,12 +205,12 @@ test('upgrades: Butter Slick leaves a puddle; overlapping puddles don\'t stack',
 
   const g2 = fieldGame();
   put(g2, COW_TYPES.cow, 30, 30, 1000);
-  g2.cows.slowF[0] = 1;
+  g2.cows.slowMult[0] = 1;
   g2.zones.push({ x: 30, z: 30, radius: 50, t: 0, T: 99, dps: 10, slow: 0.6, tower: 0, color: 0 });
   g2.zones.push({ x: 30, z: 30, radius: 50, t: 0, T: 99, dps: 20, slow: 0.6, tower: 0, color: 0 });
   run(g2, 1);
   assertClose(1000 - g2.cows.hp[0], 20, 0.01, 'damage from two overlapping puddles in 1 s');
-  assert(g2.cows.slowT[0] > 0, 'puddle did not slow');
+  assert(g2.cows.slowTime[0] > 0, 'puddle did not slow');
   assert(g2.cows.hitAge[0] > 0.5, 'puddle damage made the cow flash red');
 });
 

@@ -6,7 +6,7 @@
 import { Aabb } from './collision.js';
 import { v3 } from './vec3.js';
 import { NavGrid } from './navgrid.js';
-import { CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
+import { ABILITY_COOLDOWN, ABILITY_WINDUP, CowPool, COW_TYPES, COW_TYPE_LIST, HEAL_PULSE, waveMix, pickFromMix } from './cows.js';
 import { SELL_REFUND, WRECK_REFUND, REPAIR_DELAY, REPAIR_RATE, TOWER_TYPES, TOWER_FORMS, towerMaxHp } from './towers.js';
 import { mulberry32 } from './rng.js';
 import { SURPRISES, surpriseChance, pickSurprise } from './surprises.js';
@@ -624,8 +624,8 @@ export class Game {
     for (let i = cows.count - 1; i >= 0; i--) {
       const type = COW_TYPE_LIST[cows.type[i]];
       const x = cows.x[i], z = cows.z[i];
-      cows.px[i] = x;
-      cows.pz[i] = z;
+      cows.prevX[i] = x;
+      cows.prevZ[i] = z;
       cows.hitAge[i] += dt;
       const cell = grid.cellAt(x, z);
       if (cell >= 0 && grid.goal[cell]) {
@@ -636,25 +636,25 @@ export class Game {
       }
       // Headbutt Heifers, Cud Spitters and bosses stand still while they wind up and hit.
       if ((type.boss ? this.bossAct(i, type, dt) : type.windup > 0 && this.cowAbility(i, type, dt))) {
-        cows.px[i] = cows.x[i];
-        cows.pz[i] = cows.z[i];
-        if (cows.slowT[i] > 0) cows.slowT[i] -= dt;
+        cows.prevX[i] = cows.x[i];
+        cows.prevZ[i] = cows.z[i];
+        if (cows.slowTime[i] > 0) cows.slowTime[i] -= dt;
         continue;
       }
       // Walkers follow the flow field; flyers go straight for the milk over everything.
-      let tx = this.milkX + cows.ox[i], tz = this.milkZ + cows.oz[i];
+      let tx = this.milkX + cows.offsetX[i], tz = this.milkZ + cows.offsetZ[i];
       const n = cell >= 0 && type.altitude <= 0 ? grid.next[cell] : -1;
       if (n >= 0) {
-        tx = grid.centerX(n) + cows.ox[i];
-        tz = grid.centerZ(n) + cows.oz[i];
+        tx = grid.centerX(n) + cows.offsetX[i];
+        tz = grid.centerZ(n) + cows.offsetZ[i];
       }
       const dx = tx - x, dz = tz - z;
       const len = Math.sqrt(dx * dx + dz * dz);
       let speed = type.speed;
       if (type.enrageBelow > 0 && cows.hp[i] < type.enrageBelow * cows.maxHp[i]) speed *= type.enrageSpeed;
-      if (cows.slowT[i] > 0) {
-        speed *= cows.slowF[i];
-        cows.slowT[i] -= dt;
+      if (cows.slowTime[i] > 0) {
+        speed *= cows.slowMult[i];
+        cows.slowTime[i] -= dt;
       }
       const wx = len > 1e-9 ? (dx / len) * speed : 0;
       const wz = len > 1e-9 ? (dz / len) * speed : 0;
@@ -708,17 +708,17 @@ export class Game {
    */
   cowAbility(i, type, dt) {
     const { cows } = this;
-    if (cows.slowT[i] > 0 && cows.slowF[i] === 0) {
+    if (cows.slowTime[i] > 0 && cows.slowMult[i] === 0) {
       // Tipped over: it can't do anything, and a wind-up is lost.
-      if (cows.abilS[i]) { cows.abilS[i] = 0; cows.abilT[i] = type.abilityCooldown * 0.5; }
+      if (cows.abilityState[i] === ABILITY_WINDUP) { cows.abilityState[i] = ABILITY_COOLDOWN; cows.abilityTime[i] = type.abilityCooldown * 0.5; }
       return false;
     }
-    if (cows.abilS[i] === 1) {
-      cows.abilT[i] -= dt;
-      if (cows.abilT[i] > 0) return true;
-      cows.abilS[i] = 0;
-      cows.abilT[i] = type.abilityCooldown;
-      const t = this.towers.get(cows.abilTower[i]);
+    if (cows.abilityState[i] === ABILITY_WINDUP) {
+      cows.abilityTime[i] -= dt;
+      if (cows.abilityTime[i] > 0) return true;
+      cows.abilityState[i] = ABILITY_COOLDOWN;
+      cows.abilityTime[i] = type.abilityCooldown;
+      const t = this.towers.get(cows.abilityTarget[i]);
       if (!t) return true; // sold or wrecked mid wind-up: a whiff
       const x = cows.x[i], z = cows.z[i];
       if (type.ramDamage > 0) {
@@ -731,13 +731,13 @@ export class Game {
       }
       return true;
     }
-    if (cows.abilT[i] > 0) { cows.abilT[i] -= dt; return false; }
+    if (cows.abilityTime[i] > 0) { cows.abilityTime[i] -= dt; return false; }
     const x = cows.x[i], z = cows.z[i];
     const t = type.ramDamage > 0 ? this.towerAt(x, z, type.radius + RAM_REACH) : this.spitTarget(x, z, type.spitRange);
     if (!t) return false;
-    cows.abilS[i] = 1;
-    cows.abilT[i] = type.windup;
-    cows.abilTower[i] = t.id;
+    cows.abilityState[i] = ABILITY_WINDUP;
+    cows.abilityTime[i] = type.windup;
+    cows.abilityTarget[i] = t.id;
     // Face the tower (the renderer turns cows to their velocity) without moving.
     const dx = t.x - x, dz = t.z - z, len = Math.sqrt(dx * dx + dz * dz) || 1;
     cows.vx[i] = (dx / len) * 1e-3;
@@ -814,8 +814,8 @@ export class Game {
     for (let i = 0; i < cows.count; i++) {
       const type = COW_TYPE_LIST[cows.type[i]];
       if (type.altitude > 0 || type.boss) continue; // you can't tip MAMA
-      cows.slowF[i] = 0;
-      cows.slowT[i] = Math.max(cows.slowT[i], time);
+      cows.slowMult[i] = 0;
+      cows.slowTime[i] = Math.max(cows.slowTime[i], time);
       n++;
     }
     return n;
@@ -964,9 +964,9 @@ export class Game {
     const { cows } = this;
     const resist = COW_TYPE_LIST[cows.type[i]].slowResist;
     if (resist > 0) factor += (1 - factor) * resist;
-    if (cows.slowT[i] <= 0 || factor <= cows.slowF[i]) {
-      cows.slowF[i] = factor;
-      if (time > cows.slowT[i]) cows.slowT[i] = time;
+    if (cows.slowTime[i] <= 0 || factor <= cows.slowMult[i]) {
+      cows.slowMult[i] = factor;
+      if (time > cows.slowTime[i]) cows.slowTime[i] = time;
     }
   }
 
@@ -991,7 +991,7 @@ export class Game {
     const { cows } = this;
     const type = COW_TYPE_LIST[cows.type[i]];
     // Brain freeze makes a cow brittle: everything hurts more while it lasts.
-    if (cows.chillT[i] > 0) damage *= cows.chillV[i];
+    if (cows.chillTime[i] > 0) damage *= cows.chillMult[i];
     // Armor blunts direct hits (flash) only, never below a quarter of the hit; slicks, burns and railgun slugs go through.
     if (flash && !pierce && type.armor > 0) damage = Math.max(0.25 * damage, damage - type.armor);
     cows.hp[i] -= damage;
@@ -1004,8 +1004,8 @@ export class Game {
     this.kills++;
     if (tower) tower.kills++;
     this.events.push({ kind: 'kill', x, z, id: cows.id[i], mult });
-    const burnS = cows.burnT[i] > 0 ? cows.burnS[i] : 0;
-    const burnD = cows.burnD[i], burnT = cows.burnT[i], burnTower = cows.burnTower[i];
+    const burnS = cows.burnTime[i] > 0 ? cows.burnSpread[i] : 0;
+    const burnD = cows.burnDps[i], burnT = cows.burnTime[i], burnTower = cows.burnSource[i];
     cows.remove(i);
     // Flambé: a burning cow that drops lights up the herd around it. Only sets burns, never removes a cow.
     if (burnS > 0) this.spreadBurn(x, z, burnS, burnD, burnT, burnTower);
@@ -1017,19 +1017,19 @@ export class Game {
   /** Light cow i: `dps` for `time` s (a weaker burn never replaces a hotter running one), spreading `spread` m on death. */
   igniteCow(i, dps, time, spread, towerId) {
     const { cows } = this;
-    if (cows.burnT[i] > 0 && dps < cows.burnD[i]) return;
-    cows.burnD[i] = dps;
-    cows.burnS[i] = spread;
-    cows.burnTower[i] = towerId;
-    if (time > cows.burnT[i]) cows.burnT[i] = time;
+    if (cows.burnTime[i] > 0 && dps < cows.burnDps[i]) return;
+    cows.burnDps[i] = dps;
+    cows.burnSpread[i] = spread;
+    cows.burnSource[i] = towerId;
+    if (time > cows.burnTime[i]) cows.burnTime[i] = time;
   }
 
   /** Brain-freeze cow i: × `vuln` damage taken for `time` s (the strongest running freeze wins). */
   chillCow(i, vuln, time) {
     const { cows } = this;
-    if (cows.chillT[i] > 0 && vuln < cows.chillV[i]) return;
-    cows.chillV[i] = vuln;
-    if (time > cows.chillT[i]) cows.chillT[i] = time;
+    if (cows.chillTime[i] > 0 && vuln < cows.chillMult[i]) return;
+    cows.chillMult[i] = vuln;
+    if (time > cows.chillTime[i]) cows.chillTime[i] = time;
   }
 
   spreadBurn(x, z, radius, dps, time, towerId) {
@@ -1041,7 +1041,7 @@ export class Game {
       const r = radius + type.radius, dx = cows.x[k] - x, dz = cows.z[k] - z;
       if (dx * dx + dz * dz > r * r) continue;
       // Caught fire second-hand: it doesn't spread any further (no endless chain through a herd).
-      if (cows.burnT[k] <= 0 || dps >= cows.burnD[k]) { this.igniteCow(k, dps, time * 0.75, 0, towerId); n++; }
+      if (cows.burnTime[k] <= 0 || dps >= cows.burnDps[k]) { this.igniteCow(k, dps, time * 0.75, 0, towerId); n++; }
     }
     if (n) this.events.push({ kind: 'flambe', x, z, radius, count: n });
   }
@@ -1050,11 +1050,11 @@ export class Game {
   updateBurns(dt) {
     const { cows } = this;
     for (let i = cows.count - 1; i >= 0; i--) {
-      if (cows.chillT[i] > 0 && (cows.chillT[i] -= dt) <= 0) cows.chillV[i] = 1;
-      if (cows.burnT[i] <= 0) continue;
-      const d = cows.burnD[i] * Math.min(dt, cows.burnT[i]);
-      cows.burnT[i] -= dt;
-      this.damageCow(i, d, this.towers.get(cows.burnTower[i]), false);
+      if (cows.chillTime[i] > 0 && (cows.chillTime[i] -= dt) <= 0) cows.chillMult[i] = 1;
+      if (cows.burnTime[i] <= 0) continue;
+      const d = cows.burnDps[i] * Math.min(dt, cows.burnTime[i]);
+      cows.burnTime[i] -= dt;
+      this.damageCow(i, d, this.towers.get(cows.burnSource[i]), false);
     }
   }
 
