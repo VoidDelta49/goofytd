@@ -1,11 +1,12 @@
 {
   "name": "goofytd",
   "private": true,
-  "description": "CowTD: goofy first-person tower defense. No build step; this file only tells Node the sources are ES modules and gives a test shortcut.",
+  "description": "CowTD: goofy first-person tower defense. No build step for the site; this file only tells Node the sources are ES modules and gives shortcuts. `npm run wasm` rebuilds the Rust sim core (CI does it too).",
   "type": "module",
   "scripts": {
     "test": "node tests/run.js",
     "stamp": "node tools/stamp.js",
-    "serve": "python3 -m http.server 8080"
+    "serve": "python3 -m http.server 8080",
+    "wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path sim-rs/Cargo.toml && cp sim-rs/target/wasm32-unknown-unknown/release/cowtd_sim.wasm src/sim/wasm/sim.wasm && node tools/stamp.js"
   }
 }

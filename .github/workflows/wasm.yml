@@ -1,0 +1,41 @@
+# Builds the Rust sim core (sim-rs/) into src/sim/wasm/sim.wasm, restamps,
+# runs the full test suite against it (including Rust/JS parity), and commits
+# the result to the same branch. The site itself stays no-build: Pages just
+# serves the committed sim.wasm. Locally: `npm run wasm` does the same build.
+name: wasm
+
+on:
+  push:
+    paths:
+      - 'sim-rs/**'
+      - '.github/workflows/wasm.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo test --manifest-path sim-rs/Cargo.toml
+      - run: npm run wasm
+      - name: Tests (Rust-backed sim)
+        run: npm test
+      - name: Commit sim.wasm if it changed
+        run: |
+          git add src/sim/wasm index.html
+          if git diff --cached --quiet; then echo "sim.wasm up to date"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898699+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Build sim.wasm from sim-rs"
+          git push
