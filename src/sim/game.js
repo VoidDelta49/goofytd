@@ -140,6 +140,8 @@ export class Game {
     /** Bounties × bountyMult while bountyTime > 0 (Happy Hour). */
     this.bountyMult = 1;
     this.bountyTime = 0;
+    /** Moolah the Cheese Vaults paid at the start of the last wave. */
+    this.lastInterest = 0;
     /** War Moo-st: fogT s into a fog lasting fogDur s (0 = clear). Towers see sight × their range. */
     this.fogT = 0;
     this.fogDur = 0;
@@ -160,11 +162,29 @@ export class Game {
       s.queue += Math.floor(total / this.spawners.length) + (k < total % this.spawners.length ? 1 : 0);
     });
     this.money += this.cfg.waveBonus;
+    this.payInterest();
     this.nextWaveIn = null;
     this.spawnHold = 0;
     this.spawnRate = 1;
     if (this.cfg.surprises) this.rollSurprises();
     this.events.push({ kind: 'wave', wave: this.wave });
+  }
+
+  /**
+   * Cheese Vaults: each pays `interest` of the moolah banked as the wave starts
+   * (all worked out from the same balance, so build order doesn't matter), up to its `interestCap`.
+   * Saves the total in lastInterest (a hand-started wave's event never reaches the client).
+   */
+  payInterest() {
+    const base = this.money;
+    let paid = 0;
+    for (const t of this.towers.values()) {
+      const d = t.def;
+      if (d.interest > 0) paid += Math.min(d.interestCap, Math.floor(base * d.interest));
+    }
+    this.money += paid;
+    this.lastInterest = paid;
+    if (paid) this.events.push({ kind: 'interest', amount: paid });
   }
 
   get spawning() { return this.runs.length > 0 || this.spawners.some((s) => s.queue > 0); }
@@ -350,6 +370,7 @@ export class Game {
     this.updateTowers(dt);
     this.updateProjectiles(dt);
     this.updateZones(dt);
+    this.updateBurns(dt);
     this.watchTracked();
   }
 
@@ -717,25 +738,90 @@ export class Game {
 
   /**
    * Returns true if the cow died. Only call while iterating cows backwards (or not at all).
-   * `flash` false for damage over time (a slick), so cows don't strobe red.
+   * `flash` false for damage over time (a slick, a burn), so cows don't strobe red.
+   * `pierce` true for armour-piercing hits (the Cheddar Railgun).
    */
-  damageCow(i, damage, tower, flash = true) {
+  damageCow(i, damage, tower, flash = true, pierce = false) {
     const { cows } = this;
     const type = COW_TYPE_LIST[cows.type[i]];
-    // Armor blunts direct hits (flash) only, never below a quarter of the hit; slicks seep through.
-    if (flash && type.armor > 0) damage = Math.max(0.25 * damage, damage - type.armor);
+    // Brain freeze makes a cow brittle: everything hurts more while it lasts.
+    if (cows.chillT[i] > 0) damage *= cows.chillV[i];
+    // Armor blunts direct hits (flash) only, never below a quarter of the hit; slicks, burns and railgun slugs go through.
+    if (flash && !pierce && type.armor > 0) damage = Math.max(0.25 * damage, damage - type.armor);
     cows.hp[i] -= damage;
     if (flash) cows.hitAge[i] = 0;
     if (cows.hp[i] > 0) return false;
-    this.money += type.bounty * this.bountyMult;
+    const x = cows.x[i], z = cows.z[i];
+    // An Auction Barn nearby sells the cow for more (the best barn in reach; whole moolah only).
+    const mult = this.bankMult(x, z);
+    this.money += Math.round(type.bounty * this.bountyMult * mult);
     this.kills++;
     if (tower) tower.kills++;
-    const x = cows.x[i], z = cows.z[i];
-    this.events.push({ kind: 'kill', x, z, id: cows.id[i] });
+    this.events.push({ kind: 'kill', x, z, id: cows.id[i], mult });
+    const burnS = cows.burnT[i] > 0 ? cows.burnS[i] : 0;
+    const burnD = cows.burnD[i], burnT = cows.burnT[i], burnTower = cows.burnTower[i];
     cows.remove(i);
+    // Flambé: a burning cow that drops lights up the herd around it. Only sets burns, never removes a cow.
+    if (burnS > 0) this.spreadBurn(x, z, burnS, burnD, burnT, burnTower);
     // Remove first, then append: the new cows land in slots above every slot a caller still holds.
     if (type.splitInto) this.splitCow(type, x, z);
     return true;
+  }
+
+  /** Light cow i: `dps` for `time` s (a weaker burn never replaces a hotter running one), spreading `spread` m on death. */
+  igniteCow(i, dps, time, spread, towerId) {
+    const { cows } = this;
+    if (cows.burnT[i] > 0 && dps < cows.burnD[i]) return;
+    cows.burnD[i] = dps;
+    cows.burnS[i] = spread;
+    cows.burnTower[i] = towerId;
+    if (time > cows.burnT[i]) cows.burnT[i] = time;
+  }
+
+  /** Brain-freeze cow i: × `vuln` damage taken for `time` s (the strongest running freeze wins). */
+  chillCow(i, vuln, time) {
+    const { cows } = this;
+    if (cows.chillT[i] > 0 && vuln < cows.chillV[i]) return;
+    cows.chillV[i] = vuln;
+    if (time > cows.chillT[i]) cows.chillT[i] = time;
+  }
+
+  spreadBurn(x, z, radius, dps, time, towerId) {
+    const { cows } = this;
+    let n = 0;
+    for (let k = 0; k < cows.count; k++) {
+      const type = COW_TYPE_LIST[cows.type[k]];
+      if (type.altitude > 0) continue;
+      const r = radius + type.radius, dx = cows.x[k] - x, dz = cows.z[k] - z;
+      if (dx * dx + dz * dz > r * r) continue;
+      // Caught fire second-hand: it doesn't spread any further (no endless chain through a herd).
+      if (cows.burnT[k] <= 0 || dps >= cows.burnD[k]) { this.igniteCow(k, dps, time * 0.75, 0, towerId); n++; }
+    }
+    if (n) this.events.push({ kind: 'flambe', x, z, radius, count: n });
+  }
+
+  /** Burns tick down and hurt (credited to the tower that lit them); freezes thaw. */
+  updateBurns(dt) {
+    const { cows } = this;
+    for (let i = cows.count - 1; i >= 0; i--) {
+      if (cows.chillT[i] > 0 && (cows.chillT[i] -= dt) <= 0) cows.chillV[i] = 1;
+      if (cows.burnT[i] <= 0) continue;
+      const d = cows.burnD[i] * Math.min(dt, cows.burnT[i]);
+      cows.burnT[i] -= dt;
+      this.damageCow(i, d, this.towers.get(cows.burnTower[i]), false);
+    }
+  }
+
+  /** Bounty multiplier from the best Auction Barn whose reach covers (x, z) (1 if none). */
+  bankMult(x, z) {
+    let best = 1;
+    for (const t of this.towers.values()) {
+      const m = t.def.bountyMult;
+      if (!(m > best)) continue;
+      const dx = x - t.x, dz = z - t.z, r = t.def.range;
+      if (dx * dx + dz * dz <= r * r) best = m;
+    }
+    return best;
   }
 
   /** A dead cow of `type` bursts into splitCount × splitInto at (x, z). */
@@ -822,7 +908,7 @@ export class Game {
     const id = this.nextTowerId++;
     const t = {
       id, def: p.type, x: p.x, z: p.z, cx: p.cx, cz: p.cz, cells: p.cells, aabb: p.aabb,
-      cooldown: 0, charge: 0, kills: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
+      cooldown: 0, charge: 0, kills: 0, shots: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
       spent: p.type.cost,
       hp: towerMaxHp(p.type), maxHp: towerMaxHp(p.type), lastHit: -Infinity, stunT: 0,
     };

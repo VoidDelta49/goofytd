@@ -12,7 +12,7 @@
     {
       "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
-        "./src/client/audio.js": "./src/client/audio.js?v=947c843e5a",
+        "./src/client/audio.js": "./src/client/audio.js?v=5b06b70cc3",
         "./src/client/build.js": "./src/client/build.js?v=a43dbf97b5",
         "./src/client/hud.js": "./src/client/hud.js?v=8496fd56d5",
         "./src/client/input.js": "./src/client/input.js?v=7ee3472989",
@@ -20,21 +20,21 @@
         "./src/client/menu.js": "./src/client/menu.js?v=841fbcad6a",
         "./src/client/render.js": "./src/client/render.js?v=b3d15c77e4",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
-        "./src/client/td-render.js": "./src/client/td-render.js?v=4bce753d24",
+        "./src/client/td-render.js": "./src/client/td-render.js?v=587b7c1cb1",
         "./src/client/touch.js": "./src/client/touch.js?v=d975603b30",
         "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=31164aaee0",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=65e34bdb87",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=b4615188ec",
+        "./src/main.js": "./src/main.js?v=e0a83db8f7",
         "./src/player.js": "./src/player.js?v=7536aa98e4",
         "./src/sim/collision.js": "./src/sim/collision.js?v=033ca35879",
-        "./src/sim/cows.js": "./src/sim/cows.js?v=38790e2a05",
-        "./src/sim/game.js": "./src/sim/game.js?v=b617b3b355",
+        "./src/sim/cows.js": "./src/sim/cows.js?v=e8bb8c30d1",
+        "./src/sim/game.js": "./src/sim/game.js?v=fce098e6c3",
         "./src/sim/movement.js": "./src/sim/movement.js?v=1a392d2ef4",
         "./src/sim/navgrid.js": "./src/sim/navgrid.js?v=ceff0141a5",
         "./src/sim/rng.js": "./src/sim/rng.js?v=518b96c106",
         "./src/sim/surprises.js": "./src/sim/surprises.js?v=2c1c5cfc50",
-        "./src/sim/towers.js": "./src/sim/towers.js?v=0d2f7eba57",
+        "./src/sim/towers.js": "./src/sim/towers.js?v=a3ee8fb330",
         "./src/sim/vec3.js": "./src/sim/vec3.js?v=0643c68bb6"
       }
     }
@@ -84,9 +84,10 @@
       position: absolute; left: 50%; top: calc(50% + 28px); transform: translateX(-50%); white-space: nowrap;
     }
     #hud [data-hud=place].bad { color: #ff8a8a; }
+    /* Spans the screen (not left: 50%, which would cap its width at half the screen) and wraps if six towers don't fit. */
     #hud [data-hud=buildbar] {
-      position: absolute; left: 50%; bottom: calc(12px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-      display: flex; gap: 8px; white-space: nowrap;
+      position: absolute; left: 8px; right: 8px; bottom: calc(12px + env(safe-area-inset-bottom));
+      display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; white-space: nowrap; pointer-events: none;
     }
     #hud [data-hud=buildbar] .slot {
       padding: 3px 9px; border-radius: 6px; background: #0006; border: 2px solid transparent;
@@ -95,6 +96,16 @@
     #hud [data-hud=buildbar] .slot.on { border-color: #ffd84d; background: #0009; }
     #hud [data-hud=buildbar] .slot.poor .cost { color: #ff8a8a; }
     #hud [data-hud=buildbar] .cost { color: #ffd84d; }
+    /* Six towers: on narrower desktops drop the hotkey badges and tighten up so the bar stays one row. */
+    @media (max-width: 1240px) {
+      #hud [data-hud=buildbar] { gap: 6px; font-size: 13px; }
+      #hud [data-hud=buildbar] .slot { padding: 3px 7px; }
+      #hud [data-hud=buildbar] .slot kbd { display: none; }
+    }
+    /* Narrower still, it wraps to two rows: lift START WAVE / TRY AGAIN clear of it. */
+    @media (max-width: 900px) {
+      body:not(.touch-device) #hud [data-hud=startwave], body:not(.touch-device) #hud [data-hud=restart] { bottom: calc(96px + env(safe-area-inset-bottom)); }
+    }
     #hud [data-hud=banner] {
       position: absolute; left: 50%; top: 32%; transform: translateX(-50%); white-space: pre; text-align: center;
       font-size: 24px; font-weight: 700; padding: 10px 18px; border-radius: 10px; background: #000b;
@@ -197,15 +208,19 @@
     /* Portrait: there's no room beside the thumb buttons, so the bar sits centred above BUILD / SELL. */
     @media (orientation: portrait) {
       body.touch-device #hud [data-hud=buildbar] {
-        right: auto; left: 50%; transform: translateX(-50%); justify-content: center;
-        bottom: calc(304px + env(safe-area-inset-bottom)); max-width: calc(100vw - 16px);
+        left: calc(8px + env(safe-area-inset-left)); right: calc(8px + env(safe-area-inset-right)); max-width: none;
+        bottom: calc(304px + env(safe-area-inset-bottom));
+        display: grid; grid-template-columns: repeat(3, 1fr);
       }
       /* The long stats line would run under NEXT WAVE / PAUSE; speed stays. */
       body.touch-device #hud [data-hud=info] { display: none; }
     }
+    /* Names wrap onto two lines so all six towers fit in one row beside the thumb buttons. */
     body.touch-device #hud [data-hud=buildbar] .slot {
-      display: flex; flex-direction: column; align-items: center; padding: 5px 8px; line-height: 1.2;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5px 6px; line-height: 1.2;
+      white-space: normal; text-align: center; max-width: 80px; box-sizing: border-box;
     }
+    @media (orientation: portrait) { body.touch-device #hud [data-hud=buildbar] .slot { max-width: none; } }
     body.touch-device #hud [data-hud=buildbar] .slot kbd { display: none; }
     /* The big start / try-again buttons move to the top so the tower bar never covers them. */
     body.touch-device #hud [data-hud=startwave] { bottom: auto; top: calc(56px + env(safe-area-inset-top)); }
@@ -432,7 +447,7 @@
       <b class="desk-only">Click to play</b>
       <b class="touch-only">Tap to play</b>
       <div class="desk-only"><kbd>W A S D</kbd> move · <kbd>Space</kbd> or wheel jump · <kbd>C</kbd>/<kbd>Shift</kbd> crouch</div>
-      <div class="desk-only"><kbd>1</kbd>–<kbd>3</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
+      <div class="desk-only"><kbd>1</kbd>–<kbd>6</kbd> pick a tower · click or <kbd>E</kbd> build · <kbd>Q</kbd>/right-click cancel · <kbd>U</kbd> upgrade · <kbd>X</kbd> sell · <kbd>N</kbd> start / next wave</div>
       <div class="desk-only"><kbd>P</kbd> pause · <kbd>R</kbd> respawn · <kbd>H</kbd> auto-hop · <kbd>F</kbd> fullscreen · <kbd>M</kbd> mute · <kbd>[</kbd> <kbd>]</kbd> sensitivity · <kbd>Esc</kbd> release mouse</div>
       <div class="touch-only">Left thumb: move · drag the right side to look</div>
       <div class="touch-only">Drag from the jump button to steer mid-air</div>

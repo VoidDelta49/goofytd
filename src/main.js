@@ -47,6 +47,7 @@ function startWave() {
   game.startWave();
   // Waves started by hand push their event outside tick(), which clears it: play the horn here.
   if (game.wave !== before) sfx.play('wave');
+  if (game.wave !== before && game.lastInterest > 0) { sfx.play('cash'); say(`Cheese Vault interest: +${game.lastInterest} moolah`, 2500); }
 }
 
 /** Short message at the top of the screen (the same spot the mouse-capture notices use). */
@@ -222,6 +223,7 @@ function frame(now) {
     sfx.consume(game.events);
     for (const e of game.events) {
       if (e.kind === 'surprise') say(e.text, 3500);
+      if (e.kind === 'interest') say(`Cheese Vault interest: +${e.amount} moolah`, 2500);
       if (e.kind === 'boom' && e.wrecked) say(`KABOOM! A Kaboom Cow blew up ${e.wrecked === 1 ? 'a tower' : `${e.wrecked} towers`}`, 2500);
       if (e.kind === 'destroyed' && e.cause === 'bonk') say(`BONK! Your ${e.name} got headbutted to bits (+${e.refund} moolah insurance)`, 2500);
     }

@@ -45,7 +45,7 @@ function buildForm(g, formId, x, z) {
   return t;
 }
 
-test('upgrades: every tower has buffs, then a choice of two variants, each with one more level', () => {
+test('upgrades: every tower has buffs, then a choice of two variants, each with one or more buff levels', () => {
   for (const root of Object.values(TOWER_TYPES)) {
     let f = root, buffs = 0;
     while (f.upgrades.length === 1) {
@@ -58,7 +58,14 @@ test('upgrades: every tower has buffs, then a choice of two variants, each with 
     for (const vid of f.upgrades) {
       const v = TOWER_FORMS[vid];
       assert(v.kind === 'variant' && v.root === root.id, `${vid}: should be a variant of ${root.id}`);
-      assert(v.upgrades.length === 1 && TOWER_FORMS[v.upgrades[0]].upgrades.length === 0, `${vid}: should have exactly one more level`);
+      // A straight line of buffs to the end: no second choice down a path.
+      let n = 0;
+      for (let f2 = v; f2.upgrades.length; n++) {
+        assert(f2.upgrades.length === 1, `${f2.id}: only one choice per tower`);
+        f2 = TOWER_FORMS[f2.upgrades[0]];
+        assert(f2.kind === 'buff', `${f2.id}: levels after a variant should be buffs`);
+      }
+      assert(n >= 1, `${vid}: should have at least one more level`);
     }
   }
   for (const f of Object.values(TOWER_FORMS)) {

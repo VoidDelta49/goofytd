@@ -215,8 +215,17 @@ export class CowPool {
     this.abilS = new Uint8Array(capacity);
     /** A tower id, never a slot (towers can be sold or wrecked mid wind-up). */
     this.abilTower = new Uint32Array(capacity);
+    /** On fire (Milk Frother family): burnD hp/s for burnT more s, credited to tower burnTower; a dead burner lights cows within burnS m. */
+    this.burnT = new Float64Array(capacity);
+    this.burnD = new Float64Array(capacity);
+    this.burnS = new Float64Array(capacity);
+    this.burnTower = new Uint32Array(capacity);
+    /** Brain-frozen (Soft-Serve family): takes chillV × damage from everything for chillT more s. */
+    this.chillT = new Float64Array(capacity);
+    this.chillV = new Float64Array(capacity);
     this.nextId = 1;
-    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF, this.abilT, this.abilS, this.abilTower];
+    this.fields = [this.x, this.z, this.px, this.pz, this.vx, this.vz, this.ox, this.oz, this.hp, this.maxHp, this.type, this.hitAge, this.id, this.slowT, this.slowF, this.abilT, this.abilS, this.abilTower,
+      this.burnT, this.burnD, this.burnS, this.burnTower, this.chillT, this.chillV];
   }
 
   /** Returns the slot, or -1 when full. */
@@ -238,6 +247,10 @@ export class CowPool {
     this.abilT[i] = type.spitRange > 0 ? type.abilityCooldown * 0.4 : 0;
     this.abilS[i] = 0;
     this.abilTower[i] = 0;
+    this.burnT[i] = this.burnD[i] = this.burnS[i] = 0;
+    this.burnTower[i] = 0;
+    this.chillT[i] = 0;
+    this.chillV[i] = 1;
     return i;
   }
 

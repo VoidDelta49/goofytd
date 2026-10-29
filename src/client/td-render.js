@@ -53,6 +53,8 @@ export class TdRenderer {
     this.goo = new THREE.Color(0.85, 0.62, 0.25);
     this.rage = new THREE.Color(1, 0.15, 0.1);
     this.healGlow = new THREE.Color(0.3, 1, 0.45);
+    this.ice = new THREE.Color(0.6, 0.85, 1);
+    this.ember = new THREE.Color(1, 0.45, 0.1);
 
     this.towerViews = new Map();
     this.ghosts = new Map();
@@ -179,6 +181,14 @@ export class TdRenderer {
     for (const e of events) {
       if (e.kind === 'shot') {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ ...e, age: 0 });
+        if (e.crit) this.puff(e.x1, e.y1, e.z1, 0.7, 0xff3a6a);
+        if (e.beam) this.puff(e.x0, e.y0, e.z0, 0.5, e.color);
+      } else if (e.kind === 'spray') {
+        this.spray(e);
+      } else if (e.kind === 'flambe') {
+        this.puff(e.x, 0.6, e.z, e.radius * 0.8, 0xff7a1a);
+      } else if (e.kind === 'execute') {
+        this.puff(e.x, 1.0, e.z, 1.1, 0x9a4dff);
       } else if (e.kind === 'splash') {
         this.puff(e.x, e.y ?? 0.3, e.z, e.radius, e.color);
       } else if (e.kind === 'split') {
@@ -187,6 +197,8 @@ export class TdRenderer {
         this.puff(e.x, 0.4, e.z, e.radius * 0.6, 0x7dffa0);
       } else if (e.kind === 'kill') {
         this.puff(e.x, 0.8, e.z, 0.9, 0xffffff);
+        // Sold at auction: a little gold coin puff above it.
+        if (e.mult > 1) this.puff(e.x, 2.0, e.z, 0.35 + 0.15 * e.mult, 0xffc933);
       } else if (e.kind === 'drink') {
         this.puff(e.x, 0.8, e.z, 1.2, 0xf0f0ff);
       } else if (e.kind === 'boom') {
@@ -202,6 +214,24 @@ export class TdRenderer {
         if (this.tracers.length < MAX_TRACERS) this.tracers.push({ x0: e.x0, y0: 1.1, z0: e.z0, x1: e.x1, y1: e.y1, z1: e.z1, color: 0x8fd14f, age: 0 });
         this.puff(e.x1, e.y1, e.z1, 0.8, 0x8fd14f);
       }
+    }
+  }
+
+  /**
+   * A Milk Frother jet: a fan of short streaks across its cone, re-drawn every
+   * squirt (10 a second), so it reads as a continuous spray. Cosmetic randomness only.
+   */
+  spray(e) {
+    const half = Math.acos(e.spreadCos);
+    const base = Math.atan2(e.dz, e.dx);
+    for (let k = 0; k < 6 && this.tracers.length < MAX_TRACERS; k++) {
+      const a = base + (Math.random() * 2 - 1) * half;
+      const d0 = Math.random() * 0.4 * e.range, d1 = d0 + (0.35 + Math.random() * 0.45) * e.range;
+      const y = e.y0 - 0.3 * (d1 / e.range);
+      this.tracers.push({
+        x0: e.x0 + Math.cos(a) * d0, y0: e.y0, z0: e.z0 + Math.sin(a) * d0,
+        x1: e.x0 + Math.cos(a) * d1, y1: y, z1: e.z0 + Math.sin(a) * d1, color: e.color, age: 0, life: 0.12,
+      });
     }
   }
 
@@ -308,7 +338,9 @@ export class TdRenderer {
       if (type.enrageBelow > 0 && c.hp[i] < type.enrageBelow * c.maxHp[i]) col.lerp(this.rage, 0.6);
       if (type.healRate > 0) col.lerp(this.healGlow, 0.25 + 0.25 * Math.sin(this.time * 6 + c.id[i]));
       if (type.camo > 0) col.multiplyScalar(0.55 + 0.25 * Math.sin(this.time * 3 + c.id[i])); // shimmer in and out
-      if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
+      if (c.chillT[i] > 0) col.lerp(this.ice, 0.55); // brain-frozen: icy blue
+      else if (c.slowT[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
+      if (c.burnT[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1)); // simmering
       if (c.abilS[i] === 1 && type.spitRange > 0) col.lerp(this.spitGlow, 0.5 + 0.3 * Math.sin(this.time * 20));
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       m.setColorAt(i, col);
@@ -452,7 +484,7 @@ export class TdRenderer {
     for (let k = this.tracers.length - 1; k >= 0; k--) {
       const t = this.tracers[k];
       t.age += dt;
-      if (t.age > TRACER_LIFE) { this.tracers[k] = this.tracers[this.tracers.length - 1]; this.tracers.pop(); continue; }
+      if (t.age > (t.life ?? TRACER_LIFE)) { this.tracers[k] = this.tracers[this.tracers.length - 1]; this.tracers.pop(); continue; }
       pos.setXYZ(n * 2, t.x0, t.y0, t.z0);
       pos.setXYZ(n * 2 + 1, t.x1, t.y1, t.z1);
       col.setHex(t.color);

@@ -96,6 +96,32 @@ const SOUNDS = {
       v.noise(0.16, 0.35, 'bandpass', [2400, 1300], 2, { delay: 0.05 });
     },
   },
+  // Milk Frother family: a steam-wand hiss with a gurgle (soft-serve uses it too).
+  hiss: {
+    gap: 0.14, max: 3, vol: 0.55,
+    build(v, p) {
+      v.noise(0.16, 0.6, 'highpass', [4200 * p, 3000 * p], 0.7, { attack: 0.02 });
+      v.noise(0.14, 0.3, 'bandpass', [900 * p, 600 * p], 3, { delay: 0.02 });
+    },
+  },
+  // Hayloft Sniper: a sharp crack and a long echo off the barn.
+  crack: {
+    gap: 0.05, max: 3, vol: 1.0,
+    build(v, p) {
+      v.noise(0.05, 0.9, 'highpass', [1800, 900], 0.7, { attack: 0.002 });
+      v.tone('sine', [320 * p, 60], 0.12, 0.7);
+      v.noise(0.5, 0.22, 'lowpass', [1600, 300], 0.7, { delay: 0.12, attack: 0.03 });
+    },
+  },
+  // Auction Barn: ka-ching (a boosted bounty, or vault interest).
+  cash: {
+    gap: 0.12, max: 2, vol: 0.6,
+    build(v) {
+      v.noise(0.05, 0.4, 'bandpass', [3000, 3000], 2);
+      v.tone('square', [1568, 1568], 0.08, 0.18, { delay: 0.04, lowpass: [6000, 6000] });
+      v.tone('square', [2093, 2093], 0.25, 0.18, { delay: 0.1, lowpass: [6000, 6000] });
+    },
+  },
   // Tower upgraded: a rising arpeggio and a sparkle.
   upgrade: {
     gap: 0.1, max: 2, vol: 0.9,
@@ -635,7 +661,9 @@ export class Sfx {
         case 'shot': if (!e.quiet) this.play(e.sound ?? 'shot', e.x0, e.z0); break;
         case 'launch': this.play('launch', e.x, e.z); break;
         case 'splash': this.play('splash', e.x, e.z); break;
-        case 'kill': this.play('kill', e.x, e.z); break;
+        case 'kill': this.play('kill', e.x, e.z); if (e.mult > 1) this.play('cash', e.x, e.z); break;
+        case 'spray': this.play(e.sound ?? 'hiss', e.x0, e.z0); break;
+        case 'interest': this.play('cash'); break;
         case 'drink': this.play('drink', e.x, e.z); break;
         case 'boom': this.play('boom', e.x, e.z); break;
         case 'windup': this.play(e.ram ? 'snort' : 'hawk', e.x, e.z); break;

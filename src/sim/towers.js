@@ -15,7 +15,7 @@ import { COW_TYPE_LIST } from './cows.js';
 /**
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
  * [minRange, range × game.sight] of the tower centre (in XZ) count (sight < 1
- * in War Moo-st fog), and a camo cow only within its `camo` metres.
+ * in War Moo-st fog), and a camo cow only within its `camo` metres (unless the tower `seesCamo`).
  */
 export const TARGETING = {
   /** Furthest along the path: the cow with the shortest walk left to the milk. */
@@ -46,7 +46,7 @@ function pick(game, t, score) {
     if (!def.hitsAir && type.altitude > 0) continue;
     const d2 = dist2(cows, i, t.x, t.z);
     if (d2 > r2 || d2 < m2) continue;
-    if (type.camo > 0 && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close
+    if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close (scopes see it)
     const s = score(i);
     if (s > bestScore) { bestScore = s; best = i; }
   }
@@ -149,7 +149,96 @@ export const ATTACKS = {
     hitScratch.forEach((k, n) => game.events.push(shotEvent(game, t, k, n ? { quiet: true } : null)));
     hitAll(game, t, hitScratch, def.damage);
   },
+
+  /**
+   * Spray (Milk Frother): a jet of scalding (or freezing) milk. Every cow in
+   * the cone toward the target within range, up to `maxHits`, takes `damage`
+   * as seeping damage (no red flash, and it soaks through Tin armour), and
+   * catches the tower's `burn` { dps, time, spread } or `chill` { time, slow, vuln }.
+   * One 'spray' event per squirt for the renderer and the hiss.
+   */
+  spray(game, t, i) {
+    const { cows } = game;
+    const def = t.def;
+    let fx = cows.x[i] - t.x, fz = cows.z[i] - t.z;
+    const len = Math.sqrt(fx * fx + fz * fz) || 1;
+    fx /= len; fz /= len;
+    const range = def.range * (game.sight ?? 1);
+    const r2 = range * range;
+    hitScratch.length = 0;
+    hitScratch.push(i);
+    for (let k = cows.count - 1; k >= 0 && hitScratch.length < def.maxHits; k--) {
+      if (k === i) continue;
+      if (!def.hitsAir && COW_TYPE_LIST[cows.type[k]].altitude > 0) continue;
+      const dx = cows.x[k] - t.x, dz = cows.z[k] - t.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > r2 || d2 < 1e-9) continue;
+      if ((dx * fx + dz * fz) / Math.sqrt(d2) >= def.spreadCos) hitScratch.push(k);
+    }
+    game.events.push({
+      kind: 'spray', tower: t.id, x0: t.muzzleX, y0: t.muzzleY, z0: t.muzzleZ, dx: fx, dz: fz,
+      range, spreadCos: def.spreadCos, color: def.shotColor, sound: def.shotSound, hits: hitScratch.length,
+    });
+    hitScratch.sort((a, b) => b - a);
+    const { burn, chill } = def;
+    for (const k of hitScratch) {
+      // Status first, so the hit that lands already counts the freeze.
+      if (burn) game.igniteCow(k, burn.dps, burn.time, burn.spread ?? 0, t.id);
+      if (chill) { game.chillCow(k, chill.vuln, chill.time); game.slowCow(k, chill.slow, chill.time); }
+      game.damageCow(k, def.damage, t, false);
+    }
+  },
+
+  /**
+   * Snipe: one big hitscan shot. Every `critEvery`-th shot is a headshot for
+   * `critMult` × damage; a non-boss cow left under `execute` of its max HP is finished off.
+   */
+  snipe(game, t, i) {
+    const { cows } = game;
+    const def = t.def;
+    t.shots = (t.shots ?? 0) + 1;
+    const crit = def.critEvery > 0 && t.shots % def.critEvery === 0;
+    const type = COW_TYPE_LIST[cows.type[i]];
+    game.events.push(shotEvent(game, t, i, crit ? { crit: true } : null));
+    if (game.damageCow(i, def.damage * (crit ? def.critMult : 1), t)) return;
+    if (def.execute > 0 && type.hp <= EXECUTE_MAX_HP && cows.hp[i] < def.execute * cows.maxHp[i]) {
+      game.events.push({ kind: 'execute', x: cows.x[i], z: cows.z[i] });
+      game.damageCow(i, cows.hp[i] + 1e9, t);
+    }
+  },
+
+  /**
+   * Pierce (railgun): an armour-piercing slug through the target and on to
+   * the end of its range, hitting every cow within `beamWidth` m of the line
+   * (flyers too), up to `maxHits`.
+   */
+  pierce(game, t, i) {
+    const { cows } = game;
+    const def = t.def;
+    let fx = cows.x[i] - t.x, fz = cows.z[i] - t.z;
+    const len = Math.sqrt(fx * fx + fz * fz) || 1;
+    fx /= len; fz /= len;
+    const range = def.range * (game.sight ?? 1);
+    hitScratch.length = 0;
+    hitScratch.push(i);
+    for (let k = cows.count - 1; k >= 0 && hitScratch.length < def.maxHits; k--) {
+      if (k === i) continue;
+      const type = COW_TYPE_LIST[cows.type[k]];
+      const dx = cows.x[k] - t.x, dz = cows.z[k] - t.z;
+      const along = dx * fx + dz * fz;
+      if (along <= 0 || along > range) continue;
+      const side = dx * -fz + dz * fx, w = def.beamWidth + type.radius;
+      if (side * side <= w * w) hitScratch.push(k);
+    }
+    const ex = t.x + fx * range, ez = t.z + fz * range;
+    game.events.push({ ...shotEvent(game, t, i), x1: ex, y1: 1.0, z1: ez, beam: true });
+    hitScratch.sort((a, b) => b - a);
+    for (const k of hitScratch) game.damageCow(k, def.damage, t, true, true);
+  },
 };
+
+/** Executions never finish off cows tougher than this (Big Bessie, Mega Mama): bosses go down the hard way. */
+export const EXECUTE_MAX_HP = 200;
 
 /** Buildable tower types by id, in definition order (that order is the build bar and the 1-9 hotkeys). */
 export const TOWER_TYPES = {};
@@ -192,6 +281,15 @@ function resolve(def) {
  *   parts                 boxes to draw: { min:[x,y,z], max:[x,y,z], color, aim?:true }
  *                         in metres, local to the footprint centre at ground level;
  *                         aim parts turn to face the target (local -Z is forward)
+ *   burn, chill           'spray': { dps, time, spread } sets cows on fire (spread m: a dead
+ *                         burner lights its neighbours); { time, slow, vuln } freezes them
+ *                         (slowed, and × vuln damage from everything)
+ *   seesCamo              targets Ninja Cows at any range
+ *   critEvery, critMult   'snipe': every n-th shot does critMult × damage
+ *   execute               'snipe': finishes a non-boss cow left under this fraction of max HP
+ *   beamWidth             'pierce': metres either side of the line the slug hits
+ *   bountyMult            no attack: cows killed within `range` pay × this (best barn wins)
+ *   interest, interestCap no attack: pays interest × banked moolah (≤ cap) as each wave starts
  *   accent                UI colour for its upgrade card
  *   ...plus whatever its attack reads (flightTime, splashRadius, arcHeight, shotColor)
  */
@@ -202,6 +300,8 @@ export function defineTower(def) {
     blurb: '', range: 0, minRange: 0, hitsAir: true, interval: 1, damage: 0, muzzle: [0, 1, 0], shotColor: 0xffffff,
     minInterval: 0, spinUp: 0, spinDown: 0, maxHits: 1, spreadCos: 1, slow: 1, slowTime: 0, slick: null,
     blastProof: false, groundFactor: 1, accent: 0xffd84d, shotSound: 'shot', hp: 60,
+    burn: null, chill: null, seesCamo: false, critEvery: 0, critMult: 1, execute: 0, beamWidth: 0,
+    bountyMult: 1, interest: 0, interestCap: 0,
     ...def, ...fns,
     level: 1, root: def.id, from: null, kind: 'base', upgradeCost: 0, upgrades: [],
   });
@@ -270,8 +370,28 @@ export function towerStats(def) {
   const rows = [];
   const add = (key, label, num, value = String(num)) => rows.push({ key, label, value, num });
   const fmt = (x) => (Math.round(x * 10) / 10).toString();
-  if (!def.attack) {
+  if (!def.attack && def.bountyMult > 1) {
+    add('moolah', 'kills pay', def.bountyMult, `×${def.bountyMult}`);
+    add('range', 'reach', def.range, `${fmt(def.range)} m`);
+    if (def.interest > 0) {
+      add('interest', 'interest/wave', def.interest, `${Math.round(def.interest * 100)}%`);
+      add('cap', 'interest cap', def.interestCap);
+    }
+  } else if (!def.attack) {
     add('role', 'role', 0, 'wall');
+  } else if (def.attackName === 'spray') {
+    const dps = def.damage * fireRate(def);
+    add('dps', 'dps/cow', dps, fmt(dps));
+    add('hits', 'cows per jet', def.maxHits);
+    add('range', 'range', def.range, `${fmt(def.range)} m`);
+    if (def.burn) {
+      add('burn', 'burn', def.burn.dps, `${def.burn.dps}/s · ${def.burn.time} s`);
+      if (def.burn.spread > 0) add('spread', 'flambé spread', def.burn.spread, `${fmt(def.burn.spread)} m`);
+    }
+    if (def.chill) {
+      add('slow', 'chill slows', 1 - def.chill.slow, `${Math.round((1 - def.chill.slow) * 100)}%`);
+      add('vuln', 'frozen cows take', def.chill.vuln, `+${Math.round((def.chill.vuln - 1) * 100)}% dmg`);
+    }
   } else if (def.attackName === 'aura') {
     if (def.damage > 0) {
       add('damage', 'zap', def.damage);
@@ -281,7 +401,8 @@ export function towerStats(def) {
     if (def.slow < 1) add('slow', 'slows by', 1 - def.slow, `${Math.round((1 - def.slow) * 100)}%`);
     add('range', 'reach', def.range, `${fmt(def.range)} m`);
   } else {
-    const dps = def.damage * fireRate(def);
+    // Headshots folded into the average.
+    const dps = def.damage * fireRate(def) * (def.critEvery > 0 ? 1 + (def.critMult - 1) / def.critEvery : 1);
     add('dps', def.minInterval > 0 ? 'max dps' : def.attackName === 'shotgun' ? 'dps/cow' : 'dps', dps, fmt(dps));
     add('damage', def.attackName === 'shotgun' ? 'pellet' : def.attackName === 'lob' ? 'per cow' : 'damage', def.damage);
     if (def.groundFactor < 1) add('ground', 'vs walkers', def.groundFactor, `${Math.round(def.groundFactor * 100)}%`);
@@ -289,11 +410,15 @@ export function towerStats(def) {
     add('range', 'range', def.range, `${fmt(def.range)} m`);
     if (def.attackName === 'lob') add('splash', 'splash', def.splashRadius, `${fmt(def.splashRadius)} m`);
     if (def.attackName === 'shotgun') add('hits', 'cows per blast', def.maxHits);
+    if (def.attackName === 'pierce') { add('hits', 'cows per slug', def.maxHits); add('pierce', 'armour-piercing', 1, 'yes'); }
+    if (def.critEvery > 0) add('crit', 'headshot', def.critMult / def.critEvery, `×${def.critMult} every ${def.critEvery === 1 ? 'shot' : `${def.critEvery} shots`}`);
+    if (def.execute > 0) add('execute', 'executes under', def.execute, `${Math.round(def.execute * 100)}% hp`);
     if (def.slick) {
       add('slick', 'puddle', def.slick.dps, `${def.slick.dps}/s · ${def.slick.time} s`);
       add('slow', 'puddle slows', 1 - def.slick.slow, `${Math.round((1 - def.slick.slow) * 100)}%`);
     }
   }
+  if (def.seesCamo) add('camo', 'spots Ninjas', 1, 'yes');
   if (def.attack) add('air', 'hits flyers', def.hitsAir ? 1 : 0, def.hitsAir ? 'yes' : 'no');
   if (def.blastProof) add('blast', 'Kaboom-proof', 1, 'yes');
   add('hp', 'toughness', towerMaxHp(def));
@@ -583,4 +708,334 @@ defineUpgrade({
   name: 'Super-Glue Bale', blurb: 'glue fumes so strong even Flying Cows crawl',
   hitsAir: true, range: 4.6, slow: 0.35, accent: 0xf0f0e0,
   parts: GOO(0xd8d0b8, 0xf6f6ee),
+});
+
+// ---- Milk Frother ----------------------------------------------------------
+// A flamethrower, but it's a café steam wand: scalding milk in a short cone.
+// Hot path: burns that spread when a cow drops. Cold path: soft-serve that
+// freezes cows brittle, so every other tower hits them harder.
+
+const JUG = (body, tanks) => [
+  { min: [-0.9, 0, -0.9], max: [0.9, 0.5, 0.9], color: 0x6a707c },
+  { min: [-0.55, 0.5, -0.55], max: [0.55, 1.45, 0.55], color: body },
+  { min: [-0.5, 1.45, -0.5], max: [0.5, 1.56, 0.5], color: 0xfffaf0 },
+  { min: [0.55, 0.75, -0.1], max: [0.72, 1.25, 0.1], color: 0x2c2f3a }, // handle
+  ...tanks.map(([x, c]) => ({ min: [x - 0.18, 0.5, 0.55], max: [x + 0.18, 1.3, 0.9], color: c })),
+];
+const WAND = (len, tip, flare = 0) => [
+  { min: [-0.22, 1.0, -0.4], max: [0.22, 1.36, 0.1], color: 0x50566a, aim: true },
+  { min: [-0.08, 1.1, -len], max: [0.08, 1.26, -0.4], color: 0x8a8f9a, aim: true },
+  { min: [-0.13 - flare, 1.06 - flare, -len - 0.12], max: [0.13 + flare, 1.3 + flare, -len], color: tip, aim: true },
+];
+
+defineTower({
+  id: 'frother',
+  name: 'Milk Frother',
+  blurb: 'short-range jet of scalding steamed milk: hits a whole herd and sets them simmering',
+  cost: 90,
+  footprint: 1,
+  height: 1.6,
+  hp: 70,
+  attack: 'spray',
+  targeting: 'first',
+  hitsAir: false,
+  range: 7,
+  interval: 0.1,
+  damage: 1.6,
+  maxHits: 6,
+  spreadCos: 0.82,
+  burn: { dps: 4, time: 2 },
+  muzzle: [0, 1.18, -1.3],
+  shotColor: 0xfff4e0,
+  shotSound: 'hiss',
+  accent: 0xffc48a,
+  parts: [...JUG(0xd8dde4, []), ...WAND(1.1, 0x2c2f3a)],
+});
+
+defineUpgrade({
+  id: 'frother2', from: 'frother', kind: 'buff', cost: 60,
+  name: 'Steam Wand', blurb: 'more pressure, more steam, hotter milk',
+  damage: 2.2, range: 7.5, burn: { dps: 6, time: 2.5 },
+  parts: [...JUG(0xd8dde4, [[0, 0xd04848]]), ...WAND(1.2, 0x2c2f3a)], muzzle: [0, 1.18, -1.4],
+});
+
+defineUpgrade({
+  id: 'frother3', from: 'frother2', kind: 'buff', cost: 110,
+  name: 'Cappuccino Cannon', blurb: 'a twin-boiler espresso rig: wider jet, more cows',
+  damage: 3.2, range: 8.5, maxHits: 8, spreadCos: 0.8, burn: { dps: 9, time: 3 },
+  parts: [...JUG(0xc9a27a, [[-0.3, 0xd04848], [0.3, 0xd04848]]), ...WAND(1.35, 0x6a4024, 0.04)], muzzle: [0, 1.18, -1.55],
+});
+
+defineUpgrade({
+  id: 'brulee', from: 'frother3', kind: 'variant', cost: 200,
+  name: 'Crème Brûlée Torch', blurb: 'caramelises cows: big burns, and a burning cow that drops sets its neighbours alight (flambé)',
+  damage: 4.2, range: 9, hitsAir: true, burn: { dps: 16, time: 4, spread: 2.5 },
+  shotColor: 0xff9a3c, accent: 0xff8a3d,
+  parts: [...JUG(0xe8b860, [[-0.3, 0xff6a1a], [0.3, 0xff6a1a]]), ...WAND(1.4, 0xff6a1a, 0.06)], muzzle: [0, 1.18, -1.6],
+});
+
+defineUpgrade({
+  id: 'brulee2', from: 'brulee', kind: 'buff', cost: 260,
+  name: 'Flambé Thrower', blurb: 'brandy in the milk: hotter, longer, and the flambé jumps further',
+  damage: 5.5, range: 9.5, maxHits: 10, burn: { dps: 24, time: 4.5, spread: 3.2 },
+  shotColor: 0xff7a1a, accent: 0xff6a1a,
+  parts: [...JUG(0xb06a2a, [[-0.3, 0xff3a1a], [0.3, 0xff3a1a]]), ...WAND(1.5, 0xffd84d, 0.1)], muzzle: [0, 1.18, -1.7],
+});
+
+defineUpgrade({
+  id: 'brulee3', from: 'brulee2', kind: 'buff', cost: 380,
+  name: 'Baked Alaska Inferno', blurb: 'a meringue-crusted furnace. Whole herds go up like birthday candles',
+  damage: 7.5, range: 10.5, maxHits: 12, spreadCos: 0.76, burn: { dps: 34, time: 5, spread: 4 },
+  shotColor: 0xff5a1a, accent: 0xff4d2d,
+  parts: [
+    ...JUG(0x3a2a24, [[-0.3, 0xff3a1a], [0.3, 0xff3a1a]]),
+    { min: [-0.6, 1.56, -0.6], max: [0.6, 1.8, 0.6], color: 0xfff2d8 }, // meringue
+    ...WAND(1.65, 0xffd84d, 0.14),
+  ],
+  muzzle: [0, 1.18, -1.85],
+});
+
+defineUpgrade({
+  id: 'softserve', from: 'frother3', kind: 'variant', cost: 180,
+  name: 'Soft-Serve Blaster', blurb: 'freezing soft-serve: slows the herd and leaves them brittle, so every tower hits them harder',
+  damage: 3.4, range: 9, hitsAir: true, burn: null, chill: { time: 1.5, slow: 0.55, vuln: 1.2 },
+  shotColor: 0xd8f4ff, accent: 0x9ae0ff,
+  parts: [...JUG(0xf2c8dc, [[-0.3, 0x9ae0ff], [0.3, 0x9ae0ff]]), ...WAND(1.4, 0xffffff, 0.06)], muzzle: [0, 1.18, -1.6],
+});
+
+defineUpgrade({
+  id: 'softserve2', from: 'softserve', kind: 'buff', cost: 240,
+  name: 'Brain Freeze', blurb: 'so cold it hurts: slower cows, and they take even more damage',
+  damage: 4.4, range: 10, maxHits: 10, chill: { time: 2, slow: 0.4, vuln: 1.3 },
+  shotColor: 0xbfe8ff, accent: 0x6ac8ff,
+  parts: [...JUG(0xb8e4ff, [[-0.3, 0x5ab4ff], [0.3, 0x5ab4ff]]), ...WAND(1.5, 0xe0f6ff, 0.1)], muzzle: [0, 1.18, -1.7],
+});
+
+defineUpgrade({
+  id: 'softserve3', from: 'softserve2', kind: 'buff', cost: 340,
+  name: 'Glacier Gelato', blurb: 'an avalanche of gelato: the whole lane crawls, and shatters',
+  damage: 5.6, range: 11, maxHits: 14, spreadCos: 0.76, chill: { time: 2.5, slow: 0.3, vuln: 1.4 },
+  shotColor: 0xeaffff, accent: 0x5ab4ff,
+  parts: [
+    ...JUG(0x8fd0ff, [[-0.3, 0x3a8adf], [0.3, 0x3a8adf]]),
+    { min: [-0.45, 1.56, -0.45], max: [0.45, 1.95, 0.45], color: 0xffd0e4 }, // a scoop on top
+    ...WAND(1.65, 0xffffff, 0.14),
+  ],
+  muzzle: [0, 1.18, -1.85],
+});
+
+// ---- Hayloft Sniper --------------------------------------------------------
+// A rifle up in a little hayloft on stilts: slow, huge single shots at the
+// toughest cow in a very long range. Rail path: slugs through a whole line,
+// through armour. Assassin path: headshots and executions.
+
+const LOFT = (wall, roof) => [
+  ...[[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]].map(([x, z]) => ({ min: [x - 0.1, 0, z - 0.1], max: [x + 0.1, 2.0, z + 0.1], color: 0x6b4a2f })),
+  { min: [-0.62, 0.9, -0.62], max: [0.62, 0.98, -0.56], color: 0x6b4a2f },
+  { min: [-0.62, 0.9, 0.56], max: [0.62, 0.98, 0.62], color: 0x6b4a2f },
+  { min: [-0.9, 2.0, -0.9], max: [0.9, 2.15, 0.9], color: 0x8a5a32 },
+  { min: [-0.9, 2.15, 0.6], max: [0.9, 2.9, 0.9], color: wall },
+  { min: [-0.85, 2.15, 0.1], max: [0.85, 2.45, 0.6], color: 0xe2c25a }, // hay to lie on
+  { min: [-1.0, 2.9, -0.2], max: [1.0, 3.0, 1.0], color: roof },
+];
+const RIFLE = (len, barrel, scope, extra = []) => [
+  { min: [-0.12, 2.3, -0.1], max: [0.12, 2.5, 0.45], color: 0x6a4024, aim: true },
+  { min: [-0.05, 2.38, -len], max: [0.05, 2.46, -0.1], color: barrel, aim: true },
+  ...(scope ? [{ min: [-0.07, 2.5, -0.55], max: [0.07, 2.63, 0.05], color: scope, aim: true }] : []),
+  ...extra,
+];
+
+defineTower({
+  id: 'sniper',
+  name: 'Hayloft Sniper',
+  blurb: 'very long range, slow, huge single shots at the toughest cow',
+  cost: 110,
+  footprint: 1,
+  height: 3.0,
+  hp: 50,
+  attack: 'snipe',
+  targeting: 'strongest',
+  range: 38,
+  interval: 2.0,
+  damage: 70,
+  muzzle: [0, 2.42, -1.5],
+  shotColor: 0xfff8d0,
+  shotSound: 'crack',
+  accent: 0xd8c08a,
+  parts: [...LOFT(0xb0302a, 0x5a2a20), ...RIFLE(1.5, 0x2c2f3a, null)],
+});
+
+defineUpgrade({
+  id: 'sniper2', from: 'sniper', kind: 'buff', cost: 80,
+  name: 'Scoped Sniper', blurb: 'a proper scope: hits harder, reaches further and spots Ninja Cows at any range',
+  damage: 100, range: 42, seesCamo: true,
+  parts: [...LOFT(0xb0302a, 0x5a2a20), ...RIFLE(1.6, 0x2c2f3a, 0x111111)], muzzle: [0, 2.42, -1.6],
+});
+
+defineUpgrade({
+  id: 'sniper3', from: 'sniper2', kind: 'buff', cost: 150,
+  name: 'Long Moo-ser', blurb: 'a longer barrel and a bigger bullet',
+  damage: 160, interval: 1.8, range: 46,
+  parts: [...LOFT(0x8a2420, 0x2c2f3a), ...RIFLE(1.9, 0x2c2f3a, 0x111111, [{ min: [-0.09, 2.36, -1.95], max: [0.09, 2.48, -1.82], color: 0x50566a, aim: true }])],
+  muzzle: [0, 2.42, -1.95],
+});
+
+const RAIL = (len, coil) => RIFLE(len, 0x50566a, 0x111111, [
+  ...[0.5, 0.9, 1.3, 1.7].filter((z) => z < len).map((z) => ({ min: [-0.11, 2.32, -z - 0.08], max: [0.11, 2.52, -z], color: coil, aim: true })),
+  { min: [-0.16, 2.28, 0.0], max: [0.16, 2.56, 0.3], color: 0xffd84d, aim: true }, // cheese battery
+]);
+
+defineUpgrade({
+  id: 'rail', from: 'sniper3', kind: 'variant', cost: 240,
+  name: 'Cheddar Railgun', blurb: 'a magnet-fired cheese slug that punches through every cow in a line, armour and all',
+  attack: 'pierce', damage: 130, interval: 2.2, range: 50, maxHits: 8, beamWidth: 0.6,
+  shotColor: 0xffd84d, accent: 0xffc933,
+  parts: [...LOFT(0x8a2420, 0x2c2f3a), ...RAIL(1.9, 0x8fd8ff)], muzzle: [0, 2.42, -1.95],
+});
+
+defineUpgrade({
+  id: 'rail2', from: 'rail', kind: 'buff', cost: 330,
+  name: 'Gouda Gauss Gun', blurb: 'bigger coils, a fatter slug, a wider hole',
+  damage: 180, interval: 2.0, maxHits: 12, beamWidth: 0.8,
+  shotColor: 0xffb347, accent: 0xff9a1f,
+  parts: [...LOFT(0x2c2f3a, 0x2c2f3a), ...RAIL(2.1, 0x5ab4ff)], muzzle: [0, 2.42, -2.15],
+});
+
+defineUpgrade({
+  id: 'rail3', from: 'rail2', kind: 'buff', cost: 480,
+  name: 'Moo-ss Driver', blurb: 'a whole wheel of parmesan at a fraction of light speed',
+  damage: 250, interval: 1.8, range: 55, maxHits: 18, beamWidth: 1.0,
+  shotColor: 0xfff2b0, accent: 0xffe14d,
+  parts: [...LOFT(0x2c2f3a, 0xffd84d), ...RAIL(2.4, 0xffffff)], muzzle: [0, 2.42, -2.45],
+});
+
+defineUpgrade({
+  id: 'assassin', from: 'sniper3', kind: 'variant', cost: 230,
+  name: 'Udder Assassin', blurb: 'faster, quieter, and every third shot is a headshot for triple damage',
+  damage: 190, interval: 1.5, critEvery: 3, critMult: 3,
+  shotColor: 0xff5a7a, accent: 0xb06aff,
+  parts: [...LOFT(0x2c2f3a, 0x1d1d24), ...RIFLE(1.9, 0x1d1d24, 0xb06aff)], muzzle: [0, 2.42, -1.95],
+});
+
+defineUpgrade({
+  id: 'assassin2', from: 'assassin', kind: 'buff', cost: 320,
+  name: 'Silent Moo-n', blurb: 'headshots every other shot, and wounded cows (not bosses) under 20% get finished off',
+  damage: 240, interval: 1.3, critEvery: 2, critMult: 3, execute: 0.2,
+  shotColor: 0xd06aff, accent: 0x9a4dff,
+  parts: [...LOFT(0x1d1d24, 0x1d1d24), ...RIFLE(2.0, 0x1d1d24, 0xd06aff, [{ min: [-0.1, 2.36, -2.25], max: [0.1, 2.48, -2.0], color: 0x111111, aim: true }])],
+  muzzle: [0, 2.42, -2.25],
+});
+
+defineUpgrade({
+  id: 'assassin3', from: 'assassin2', kind: 'buff', cost: 460,
+  name: 'The Moo-fessional', blurb: 'never misses, never moos: bigger headshots, executes under 30%',
+  damage: 300, interval: 1.1, critEvery: 2, critMult: 3.5, execute: 0.3,
+  shotColor: 0xff3a6a, accent: 0xff3a6a,
+  parts: [...LOFT(0x111111, 0xd04848), ...RIFLE(2.1, 0x111111, 0xff3a6a, [{ min: [-0.1, 2.36, -2.35], max: [0.1, 2.48, -2.1], color: 0x111111, aim: true }])],
+  muzzle: [0, 2.42, -2.35],
+});
+
+// ---- Auction Barn ----------------------------------------------------------
+// The moolah multiplier: cows defeated within its reach get auctioned off for
+// more (the best barn in reach counts, they don't stack). Bull Market path:
+// a bigger multiplier. Cheese Vault path: also pays interest on banked moolah
+// at the start of every wave, so saving up pays.
+
+const BARN = (wall, roof, extra = []) => [
+  { min: [-1.7, 0, -1.4], max: [1.7, 1.8, 1.4], color: wall },
+  { min: [-1.72, 1.7, -1.42], max: [1.72, 1.8, 1.42], color: 0xf4f4ff },
+  { min: [-1.85, 1.8, -1.55], max: [1.85, 2.4, 1.55], color: roof },
+  { min: [-0.6, 0, -1.43], max: [0.6, 1.3, -1.4], color: 0xf4f4ff }, // doors
+  { min: [-0.05, 0, -1.45], max: [0.05, 1.3, -1.42], color: wall },
+  { min: [-0.9, 1.85, -1.62], max: [0.9, 2.3, -1.56], color: 0xffd84d }, // AUCTION sign
+  ...extra,
+];
+
+defineTower({
+  id: 'barn',
+  name: 'Auction Barn',
+  blurb: 'no gun: cows that drop within its reach sell for 25% more moolah',
+  cost: 120,
+  footprint: 2,
+  height: 2.4,
+  hp: 120,
+  attack: null,
+  range: 10,
+  bountyMult: 1.25,
+  accent: 0xffd84d,
+  parts: BARN(0xb0302a, 0x4a4a52),
+});
+
+defineUpgrade({
+  id: 'barn2', from: 'barn', kind: 'buff', cost: 100,
+  name: 'Livestock Exchange', blurb: 'a louder auctioneer: ×1.4 moolah, wider reach',
+  bountyMult: 1.4, range: 12,
+  parts: BARN(0xb0302a, 0x4a4a52, [{ min: [1.7, 0, -0.6], max: [1.95, 1.2, 0.6], color: 0x6b4a2f }]),
+});
+
+defineUpgrade({
+  id: 'barn3', from: 'barn2', kind: 'buff', cost: 160,
+  name: 'Stock Moo-ket', blurb: 'a trading floor full of yelling cowboys: ×1.55 moolah',
+  bountyMult: 1.55, range: 14,
+  parts: BARN(0x9a2420, 0x2c2f3a, [
+    { min: [1.7, 0, -0.6], max: [1.95, 1.2, 0.6], color: 0x6b4a2f },
+    { min: [-1.2, 2.4, -0.2], max: [1.2, 2.7, 0.2], color: 0x3a8adf }, // ticker board
+  ]),
+});
+
+defineUpgrade({
+  id: 'bullmarket', from: 'barn3', kind: 'variant', cost: 300,
+  name: 'Bull Market', blurb: 'prices only go up: ×1.9 moolah for every cow in reach',
+  bountyMult: 1.9, range: 15, accent: 0x5ad86a,
+  parts: BARN(0x2a7a3a, 0x2c2f3a, [
+    { min: [-0.25, 2.4, -0.5], max: [0.25, 2.9, 0.5], color: 0xc9a227 }, // golden bull
+    { min: [-0.3, 2.9, -0.6], max: [0.3, 3.05, -0.4], color: 0xc9a227 },
+  ]),
+});
+
+defineUpgrade({
+  id: 'bullmarket2', from: 'bullmarket', kind: 'buff', cost: 420,
+  name: 'Wall Street Bull', blurb: 'irrational exuberance: ×2.25 moolah, further reach',
+  bountyMult: 2.25, range: 16, accent: 0x3ac85a,
+  parts: BARN(0x1d5a2a, 0x111111, [
+    { min: [-0.35, 2.4, -0.7], max: [0.35, 3.1, 0.7], color: 0xffc933 },
+    { min: [-0.45, 3.1, -0.85], max: [0.45, 3.25, -0.6], color: 0xffc933 },
+  ]),
+});
+
+defineUpgrade({
+  id: 'bullmarket3', from: 'bullmarket2', kind: 'buff', cost: 600,
+  name: 'Golden Udder Exchange', blurb: 'the cows practically pay to be beaten: ×2.75 moolah',
+  bountyMult: 2.75, range: 18, accent: 0xffc933,
+  parts: BARN(0xffc933, 0xffffff, [
+    { min: [-0.45, 2.4, -0.8], max: [0.45, 3.3, 0.8], color: 0xffd84d },
+    { min: [-0.55, 3.3, -1.0], max: [0.55, 3.45, -0.7], color: 0xffd84d },
+  ]),
+});
+
+const VAULT = (wall, door, wheel) => BARN(wall, 0x2c2f3a, [
+  { min: [-0.75, 0.15, -1.48], max: [0.75, 1.45, -1.42], color: door }, // round-ish vault door
+  { min: [-0.2, 0.6, -1.52], max: [0.2, 1.0, -1.48], color: wheel },
+  { min: [-0.6, 2.4, -0.4], max: [0.6, 2.75, 0.4], color: 0xffd84d }, // a cheese wheel on the roof
+]);
+
+defineUpgrade({
+  id: 'vault', from: 'barn3', kind: 'variant', cost: 250,
+  name: 'Cheese Vault', blurb: 'aged cheese is money in the bank: pays 5% interest on your moolah (up to 40) every wave',
+  bountyMult: 1.55, range: 14, interest: 0.05, interestCap: 40, accent: 0xffe14d,
+  parts: VAULT(0x8a8f9a, 0x6a707c, 0xffd84d),
+});
+
+defineUpgrade({
+  id: 'vault2', from: 'vault', kind: 'buff', cost: 350,
+  name: 'Aged Cheddar Vault', blurb: 'older cheese, better rates: 8% interest (up to 80) and ×1.6 moolah',
+  bountyMult: 1.6, interest: 0.08, interestCap: 80, accent: 0xffc933,
+  parts: VAULT(0x6a707c, 0x50566a, 0xffc933),
+});
+
+defineUpgrade({
+  id: 'vault3', from: 'vault2', kind: 'buff', cost: 500,
+  name: 'Big Cheese Reserve', blurb: 'the central bank of cheese: 10% interest (up to 150) and ×1.65 moolah',
+  bountyMult: 1.65, range: 15, interest: 0.1, interestCap: 150, accent: 0xffb000,
+  parts: VAULT(0x3a3f50, 0xc9a227, 0xffffff),
 });
