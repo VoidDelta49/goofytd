@@ -211,7 +211,7 @@ test('fullscreen lock: on by default, ?fs=0 opts out and is remembered, ?fs=1 op
 
 // ---- touch button labels and the pause menu (no real DOM: tiny fakes) ----
 
-import { touchButtonState } from '../src/client/touch.js';
+import { touchButtonState, actionState } from '../src/client/touch.js';
 import { PauseMenu, RESTART_CONFIRM_MS } from '../src/client/menu.js';
 import { TOWER_TYPES, TOWER_FORMS, SELL_REFUND } from '../src/sim/towers.js';
 
@@ -251,6 +251,24 @@ test('touch buttons: NEXT WAVE hides before wave 1 (START button) and after losi
   assert(touchButtonState({ money: 0, wave: 0, lost: false }, b).wave.hidden, 'hidden at wave 0');
   assert(!touchButtonState({ money: 0, wave: 2, lost: false }, b).wave.hidden, 'shown mid-game');
   assert(touchButtonState({ money: 0, wave: 2, lost: true }, b).wave.hidden, 'hidden when lost');
+});
+
+test('touch ACTION button: build a picked tower, upgrade the one you look at, close the open sheet', () => {
+  const id = Object.keys(TOWER_TYPES)[0];
+  const game = { money: 1000, wave: 3, lost: false };
+  const look = { spent: 0, def: TOWER_FORMS.squirter };
+  const at = (b, open = false) => actionState(game, { selected: null, lookTower: null, preview: null, ...b }, open);
+  const idle = at({});
+  assert(idle.mode === 'idle' && idle.dim && idle.sub === 'pick a tower', `idle: ${JSON.stringify(idle)}`);
+  assert(at({ selected: id, preview: { ok: true } }).mode === 'build', 'picked tower builds');
+  assert(at({ selected: id, preview: { ok: false } }).bad, 'blocked ghost is flagged');
+  assert(at({ lookTower: look }).mode === 'upgrade', 'looking at a tower upgrades it');
+  // Aiming a buildable ghost wins over a tower in view; a blocked ghost on a tower means that tower.
+  assert(at({ selected: id, preview: { ok: true }, lookTower: look }).mode === 'build', 'buildable ghost wins');
+  assert(at({ selected: id, preview: { ok: false }, lookTower: look }).mode === 'upgrade', 'blocked ghost on a tower: upgrade it');
+  const maxed = at({ lookTower: { spent: 0, def: TOWER_FORMS.gatling2 } });
+  assert(maxed.mode === 'upgrade' && !maxed.dim && maxed.sub === 'maxed · sell', 'maxed tower still opens the sheet to sell');
+  assert(at({ lookTower: look }, true).mode === 'close', 'open sheet: closes it');
 });
 
 function fakeMenu(state) {
