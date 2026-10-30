@@ -877,21 +877,21 @@
       --sk-display: "Lilita One", "Marker Felt", "Chalkboard SE", "Arial Rounded MT Bold", sans-serif;
       --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 -.18'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
       --grain: repeating-linear-gradient(91deg, #0000 0 5px, #0000001c 5px 6px, #0000 6px 13px, #ffffff12 13px 14px, #0000 14px 23px, #00000012 23px 25px);
-      --wood: var(--noise), var(--grain), linear-gradient(#b0753a, #8a5424 55%, #6d3f17);
-      --leather: var(--noise), radial-gradient(120% 80% at 50% 0%, #ffffff14, #0000 60%), linear-gradient(#5b3a22, #3a2313);
-      --brass: linear-gradient(#fff6c9, #e9c35a 30%, #b8862a 55%, #f0d27a 80%, #9a6b1c);
+      --wood: var(--noise), var(--grain), linear-gradient(#8f6a4a, #6f5238 55%, #574230);
+      --leather: var(--noise), radial-gradient(120% 80% at 50% 0%, #ffffff14, #0000 60%), linear-gradient(#4c3d31, #30261e);
+      --brass: linear-gradient(#ece3c6, #c9b483 30%, #998052 55%, #cfbe92 80%, #77623c);
       --steel: conic-gradient(from 20deg, #f4f4f4, #9a9a9a 12%, #e8e8e8 25%, #8a8a8a 38%, #f0f0f0 50%, #9a9a9a 62%, #e4e4e4 75%, #8a8a8a 88%, #f4f4f4);
-      --gloss: linear-gradient(#ffffffb0, #ffffff30 48%, #0000 50%);
-      --stitch: 2px dashed #f1d6a8aa;
+      --gloss: linear-gradient(#ffffff70, #ffffff1c 48%, #0000 50%);
+      --stitch: 2px dashed #d9c6a688;
       --screw: radial-gradient(circle at 40% 35%, #fff8 0 1px, #c9a24a 2px, #6b4a12 4px, #0000 4.5px);
     }
 
     /* ---------- Thumb buttons: glass candy gems in a brushed-steel bezel ---------- */
     body.touch-device #touch .gem {
       border: 0; color: #fff; font-family: var(--sk-display); text-shadow: 0 -1px 0 #0009, 0 1px 0 #ffffff40;
-      background: radial-gradient(circle at 50% 120%, #ffffff55, #0000 55%), linear-gradient(var(--c1), var(--c2));
+      background: radial-gradient(circle at 50% 120%, #ffffff30, #0000 55%), linear-gradient(var(--c1), var(--c2));
       box-shadow:
-        0 0 0 3px #e9e9e9, 0 0 0 5px #8a8a8a, 0 0 0 6px #2228,
+        0 0 0 3px #cfcac2, 0 0 0 5px #7d7870, 0 0 0 6px #2228,
         0 6px 12px #000a, inset 0 -6px 14px #0006, inset 0 2px 2px #fff6;
       transition: transform 80ms, filter 80ms;
     }
@@ -902,9 +902,9 @@
     body.touch-device #touch .gem i { font-size: calc(var(--s) * 0.34); }
     body.touch-device #touch .gem b { font-size: calc(var(--s) * 0.15); letter-spacing: .5px; font-weight: 400; }
     body.touch-device #touch .gem small { font: 700 calc(var(--s) * 0.11) / 1.2 var(--sk-font); opacity: .9; }
-    body.touch-device #touch .gem.down { transform: scale(.93); filter: brightness(.85); box-shadow: 0 0 0 3px #e9e9e9, 0 0 0 5px #8a8a8a, 0 0 0 6px #2228, 0 2px 4px #000a, inset 0 4px 14px #0009; }
-    body.touch-device #touch [data-touch=jump] { --s: var(--jump); --c1: #ff7a6a; --c2: #b3150c; }
-    body.touch-device #touch [data-touch=crouch] { --s: var(--crouch); --c1: #ffd06a; --c2: #b8700a; }
+    body.touch-device #touch .gem.down { transform: scale(.93); filter: brightness(.85); box-shadow: 0 0 0 3px #cfcac2, 0 0 0 5px #7d7870, 0 0 0 6px #2228, 0 2px 4px #000a, inset 0 4px 14px #0009; }
+    body.touch-device #touch [data-touch=jump] { --s: var(--jump); --c1: #c4877c; --c2: #7f4038; }
+    body.touch-device #touch [data-touch=crouch] { --s: var(--crouch); --c1: #cdb37e; --c2: #806335; }
     body.touch-device #touch [data-touch=crouch] i { font-size: calc(var(--s) * 0.3); }
     body.touch-device #touch [data-touch=crouch] b { font-size: calc(var(--s) * 0.14); }
     /* A little lamp lights up while crouch is on. */
@@ -912,14 +912,14 @@
       content: ''; position: absolute; top: 9%; right: 9%; width: 18%; height: 18%; border-radius: 50%;
       background: radial-gradient(circle at 35% 35%, #fff8, #5a2a00); box-shadow: inset 0 0 2px #000;
     }
-    body.touch-device #touch [data-touch=crouch].on::after { background: radial-gradient(circle at 35% 35%, #fff, #7dff5a 40%, #1e8a00); box-shadow: 0 0 8px #7dff5a; }
-    body.touch-device #touch [data-touch=crouch].on { filter: brightness(.9); box-shadow: 0 0 0 3px #e9e9e9, 0 0 0 5px #8a8a8a, 0 0 0 6px #2228, 0 2px 4px #000a, inset 0 4px 14px #0008; }
-    body.touch-device #touch [data-touch=action] { --s: var(--act); --c1: #9ef06a; --c2: #2e8a0a; }
-    body.touch-device #touch [data-touch=action][data-mode=upgrade] { --c1: #7ac8ff; --c2: #0b56b8; }
+    body.touch-device #touch [data-touch=crouch].on::after { background: radial-gradient(circle at 35% 35%, #fff, #a8d890 40%, #4a7a3a); box-shadow: 0 0 5px #a8d89099; }
+    body.touch-device #touch [data-touch=crouch].on { filter: brightness(.9); box-shadow: 0 0 0 3px #cfcac2, 0 0 0 5px #7d7870, 0 0 0 6px #2228, 0 2px 4px #000a, inset 0 4px 14px #0008; }
+    body.touch-device #touch [data-touch=action] { --s: var(--act); --c1: #9fbb86; --c2: #4c6b3d; }
+    body.touch-device #touch [data-touch=action][data-mode=upgrade] { --c1: #8dabc0; --c2: #3e5a72; }
     body.touch-device #touch [data-touch=action][data-mode=close] { --c1: #c9c9c9; --c2: #5a5a5a; }
-    body.touch-device #touch [data-touch=action].dim { --c1: #b9a68a; --c2: #6b5a40; }
+    body.touch-device #touch [data-touch=action].dim { --c1: #a89d8c; --c2: #5f564a; }
     body.touch-device #touch [data-touch=action].dim i { opacity: .55; }
-    body.touch-device #touch [data-touch=action].bad { --c1: #ff8a7a; --c2: #8a1a10; animation: skNope .5s ease-in-out infinite alternate; }
+    body.touch-device #touch [data-touch=action].bad { --c1: #c48a80; --c2: #6e3530; animation: skNope .5s ease-in-out infinite alternate; }
     @keyframes skNope { to { filter: brightness(1.25); } }
 
     /* ---------- Dock: a stitched leather strap with brass knobs ---------- */
@@ -929,14 +929,14 @@
       outline: var(--stitch); outline-offset: -4px;
     }
     body.touch-device #touch .knobby {
-      border: 0; color: #4a2e05; background: radial-gradient(circle at 50% 30%, #fff7d0, #0000 45%), var(--brass);
+      border: 0; color: #4a2e05; background: radial-gradient(circle at 50% 30%, #fff4dc80, #0000 45%), var(--brass);
       box-shadow: 0 0 0 1px #5a3a08, 0 3px 4px #000a, inset 0 -3px 5px #0005;
       text-shadow: 0 1px 0 #fff8;
     }
     body.touch-device #touch .knobby i { font-size: calc(var(--knob-size) * 0.34); font-weight: 900; }
     body.touch-device #touch .knobby small { font: 800 calc(var(--knob-size) * 0.18) / 1 var(--sk-font); letter-spacing: .3px; }
     body.touch-device #touch .knobby.down { transform: translateY(2px); box-shadow: 0 0 0 1px #5a3a08, 0 1px 1px #000a, inset 0 3px 6px #0007; }
-    body.touch-device #touch .knobby.on { background: radial-gradient(circle at 50% 30%, #fff, #0000 45%), linear-gradient(#ffb36b, #e05a00 55%, #ffcf8a); color: #3a1200; }
+    body.touch-device #touch .knobby.on { background: radial-gradient(circle at 50% 30%, #fff, #0000 45%), linear-gradient(#d8b48c, #a3703f 55%, #d6bb94); color: #3a2410; }
 
     /* ---------- Stick: brushed steel plate with a rubber thumb pad ---------- */
     body.touch-device #touch .stick {
@@ -963,7 +963,7 @@
       box-shadow: 0 3px 6px #0009, inset 0 1px 0 #ffffff40, inset 0 -2px 0 #0005; color: #fff1d6; text-shadow: 0 -1px 0 #3a1c00, 0 1px 0 #ffffff30;
     }
     body.touch-device #hud [data-hud=speed] { font: 400 clamp(18px, 5.5vmin, 26px)/1.1 var(--sk-display); color: #fff1d6; letter-spacing: .5px; }
-    body.touch-device #hud [data-hud=speed].fast { color: #ffe066; text-shadow: 0 -1px 0 #3a1c00, 0 0 8px #ffb300; }
+    body.touch-device #hud [data-hud=speed].fast { color: #ead9a6; text-shadow: 0 -1px 0 #3a1c00; }
     body.touch-device #hud .td { font: 700 clamp(11px, 3.2vmin, 14px)/1.35 var(--sk-font); }
     body.touch-device #hud [data-hud=td] { color: #fff1d6; }
     body.touch-device #hud .td::before { content: 'MILK'; font: 400 12px/1.2 var(--sk-display); letter-spacing: 2px; color: #ffe9b8; }
@@ -985,11 +985,11 @@
     }
     body.touch-device #hud [data-hud=place] { font: 700 13px/1.3 var(--sk-font); padding: 2px 8px; border-radius: 10px; background: #0007; }
     body.touch-device #hud [data-hud=place].bad { color: #ff9a8a; animation: none; }
-    body.touch-device #hud .boss-name { font: 400 clamp(16px, 5vmin, 22px)/1.1 var(--sk-display); color: #ffd0e2; letter-spacing: 1px; }
+    body.touch-device #hud .boss-name { font: 400 clamp(16px, 5vmin, 22px)/1.1 var(--sk-display); color: #e8d0d6; letter-spacing: 1px; }
     body.touch-device #hud .boss-name::before, body.touch-device #hud .boss-name::after { content: none; }
-    body.touch-device #hud .boss-bar { height: 18px; padding: 0; border-radius: 10px; background: linear-gradient(#0008, #0004); box-shadow: inset 0 2px 3px #000c, 0 0 0 2px #e9c35a, 0 0 0 3px #5a3a08; }
-    body.touch-device #hud .boss-fill { border-radius: 10px; background: linear-gradient(#ffd0e4, #ff5fa0 45%, #c0105a); }
-    body.touch-device #hud .boss-bar.angry .boss-fill { background: linear-gradient(#ffd0b0, #ff4a2a 45%, #a00a00); }
+    body.touch-device #hud .boss-bar { height: 18px; padding: 0; border-radius: 10px; background: linear-gradient(#0008, #0004); box-shadow: inset 0 2px 3px #000c, 0 0 0 2px #c9b483, 0 0 0 3px #4a3a20; }
+    body.touch-device #hud .boss-fill { border-radius: 10px; background: linear-gradient(#e6c4cf, #b0727f 45%, #7d3f4c); }
+    body.touch-device #hud .boss-bar.angry .boss-fill { background: linear-gradient(#e6c0b0, #b0645a 45%, #7a3530); }
     body.touch-device #hud .boss-sub { font: 700 12px/1.3 var(--sk-font); }
 
     /* Tower shelf: a wooden plank with glossy app-icon tiles and gold coin prices. */
@@ -1000,17 +1000,17 @@
     body.touch-device #hud [data-hud=buildbar] .slot {
       position: relative; border: 0; border-radius: 22%; color: #fff; font: 400 clamp(10px, 2.9vmin, 13px)/1.05 var(--sk-display);
       text-shadow: 0 -1px 0 #0009;
-      background: linear-gradient(#ffffff70, #ffffff10 48%, #0000 50%), linear-gradient(var(--t1, #7ac8ff), var(--t2, #1e5fb8));
+      background: linear-gradient(#ffffff45, #ffffff0a 48%, #0000 50%), linear-gradient(var(--t1, #93acbd), var(--t2, #4a6476));
       box-shadow: 0 3px 4px #0009, inset 0 0 0 1px #0005, inset 0 1px 0 #fff8;
       transition: transform 120ms;
     }
-    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+2) { --t1: #ff9a7a; --t2: #c0301a; }
-    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+3) { --t1: #ffe07a; --t2: #c08a0a; }
-    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+4) { --t1: #b0f07a; --t2: #3a8a10; }
-    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+5) { --t1: #e0a0ff; --t2: #7a2ab8; }
-    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+6) { --t1: #ffb070; --t2: #c85a00; }
+    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+2) { --t1: #c49a8a; --t2: #84493c; }
+    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+3) { --t1: #cdbb88; --t2: #86703c; }
+    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+4) { --t1: #a4b98a; --t2: #536b40; }
+    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+5) { --t1: #ad9cbd; --t2: #5c4a70; }
+    body.touch-device #hud [data-hud=buildbar] .slot:nth-child(6n+6) { --t1: #c9a584; --t2: #855c38; }
     body.touch-device #hud [data-hud=buildbar] .slot.on {
-      transform: translateY(-5px) scale(1.06); box-shadow: 0 0 0 3px #fff, 0 0 0 5px #ffb300, 0 0 14px #ffd84d, 0 6px 8px #0009;
+      transform: translateY(-5px) scale(1.06); box-shadow: 0 0 0 3px #f2ead8, 0 0 0 5px #b8975a, 0 6px 8px #0009;
     }
     body.touch-device #hud [data-hud=buildbar] .slot.poor { filter: grayscale(.85) brightness(.85); }
     body.touch-device #hud [data-hud=buildbar] .cost {
@@ -1023,18 +1023,18 @@
     /* Candy START / TRY AGAIN button. */
     body.touch-device #hud [data-hud=startwave], body.touch-device #hud [data-hud=restart] {
       border: 0; border-radius: 30px; padding: 12px 30px; color: #fff; letter-spacing: 1px;
-      font: 400 clamp(20px, 6vmin, 28px)/1.1 var(--sk-display); text-shadow: 0 -2px 0 #1e5a00, 0 1px 0 #fff4;
-      background: linear-gradient(#ffffffa0, #ffffff20 48%, #0000 50%), linear-gradient(#a6f56a, #3a9a10);
-      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #2a6a08, 0 6px 0 4px #1d4a04, 0 10px 16px #000a;
+      font: 400 clamp(20px, 6vmin, 28px)/1.1 var(--sk-display); text-shadow: 0 -2px 0 #34492b, 0 1px 0 #fff4;
+      background: linear-gradient(#ffffff60, #ffffff14 48%, #0000 50%), linear-gradient(#a9c290, #557548);
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #3f5634, 0 6px 0 4px #2c3d25, 0 10px 16px #000a;
     }
     body.touch-device #hud [data-hud=startwave]::before, body.touch-device #hud [data-hud=startwave]::after,
     body.touch-device #hud [data-hud=restart]::before, body.touch-device #hud [data-hud=restart]::after { content: none; }
-    body.touch-device #hud [data-hud=restart] { background: linear-gradient(#ffffffa0, #ffffff20 48%, #0000 50%), linear-gradient(#ff9a6a, #c0301a); box-shadow: 0 0 0 3px #fff, 0 0 0 5px #7a1a08, 0 6px 0 4px #4a0d04, 0 10px 16px #000a; text-shadow: 0 -2px 0 #6a1000; }
+    body.touch-device #hud [data-hud=restart] { background: linear-gradient(#ffffff60, #ffffff14 48%, #0000 50%), linear-gradient(#c79a84, #84483c); box-shadow: 0 0 0 3px #fff, 0 0 0 5px #7a1a08, 0 6px 0 4px #4a0d04, 0 10px 16px #000a; text-shadow: 0 -2px 0 #6a1000; }
 
     /* Lose banner: a leather placard with gold lettering. */
     body.touch-device #hud [data-hud=banner] {
       padding: 14px 22px; border-radius: 14px; background: var(--leather); -webkit-background-clip: border-box; background-clip: border-box;
-      color: #ffe6a0; -webkit-text-fill-color: #ffe6a0; -webkit-text-stroke: 0; filter: none;
+      color: #e6d6ae; -webkit-text-fill-color: #e6d6ae; -webkit-text-stroke: 0; filter: none;
       font: 400 clamp(20px, 6vmin, 30px)/1.25 var(--sk-display); text-shadow: 0 -1px 0 #000, 0 1px 0 #ffffff30;
       box-shadow: 0 8px 20px #000a; outline: var(--stitch); outline-offset: -7px; animation: none;
     }
@@ -1047,8 +1047,8 @@
     body.touch-device #pause { background: radial-gradient(#0006, #000c); font-family: var(--sk-font); }
     body.touch-device #pause .panel {
       position: relative; border-radius: 14px; color: #fff; padding: 16px; gap: 9px;
-      background: linear-gradient(#ffffff38, #ffffff0a 50%, #0000 52%) 0 0 / 100% 64px no-repeat, linear-gradient(#3d5d9cf2, #1a2c5cf2);
-      box-shadow: 0 0 0 2px #e8eeffcc, 0 12px 32px #000c;
+      background: linear-gradient(#ffffff22, #ffffff06 50%, #0000 52%) 0 0 / 100% 64px no-repeat, linear-gradient(#56667af2, #2e3846f2);
+      box-shadow: 0 0 0 2px #d6dbe2aa, 0 12px 32px #000c;
     }
     body.touch-device #pause h2 {
       margin: 0 0 4px; padding: 0; display: block; background: none; text-align: center;
@@ -1058,17 +1058,17 @@
     body.touch-device #pause button {
       border-radius: 9px; color: #fff; font: 700 14px/1.2 var(--sk-font); text-shadow: 0 -1px 0 #0009;
       background: linear-gradient(#ffffff50, #ffffff1c 50%, #ffffff0a 51%, #ffffff20);
-      box-shadow: 0 0 0 1px #0a1638, inset 0 1px 0 #ffffff70, 0 1px 0 #ffffff25;
+      box-shadow: 0 0 0 1px #1c242e, inset 0 1px 0 #ffffff70, 0 1px 0 #ffffff25;
     }
-    body.touch-device #pause button:active { padding-top: 6px; background: linear-gradient(#0003, #ffffff10); box-shadow: 0 0 0 1px #0a1638, inset 0 2px 5px #0008; }
+    body.touch-device #pause button:active { padding-top: 6px; background: linear-gradient(#0003, #ffffff10); box-shadow: 0 0 0 1px #1c242e, inset 0 2px 5px #0008; }
     body.touch-device #pause .primary {
       border: 0; color: #fff; font: 400 22px/1.1 var(--sk-display); letter-spacing: 1px; filter: none;
-      background: linear-gradient(#ffffff80, #ffffff20 48%, #0000 50%), linear-gradient(#7ab8ff, #1a5ad8);
-      box-shadow: 0 0 0 1px #0a1638, inset 0 1px 0 #fff9, 0 2px 4px #0006;
+      background: linear-gradient(#ffffff80, #ffffff20 48%, #0000 50%), linear-gradient(#93abc2, #4c6782);
+      box-shadow: 0 0 0 1px #1c242e, inset 0 1px 0 #fff9, 0 2px 4px #0006;
     }
-    body.touch-device #pause .danger { color: #fff; background: linear-gradient(#ffffff70, #ffffff10 48%, #0000 50%), linear-gradient(#ff7a6a, #b8180c); }
+    body.touch-device #pause .danger { color: #fff; background: linear-gradient(#ffffff70, #ffffff10 48%, #0000 50%), linear-gradient(#c4877c, #7f4038); }
     body.touch-device #pause .danger.armed { animation: skNope .3s ease-in-out infinite alternate; }
-    body.touch-device #pause .keys, body.touch-device #pause .note { color: #d8e2ff; }
+    body.touch-device #pause .keys, body.touch-device #pause .note { color: #d4dae2; }
 
     /* ---------- Upgrade sheet: stitched leather, brass name plate ---------- */
     body.touch-device #upgrade { font-family: var(--sk-font); }
@@ -1095,20 +1095,20 @@
     }
     body.touch-device #upgrade .x {
       width: 36px; height: 36px; border-radius: 50%; color: #fff; font-size: 15px;
-      background: linear-gradient(#ffffff80, #ffffff10 48%, #0000 50%), linear-gradient(#ff7a6a, #b3150c);
+      background: linear-gradient(#ffffff50, #ffffff0c 48%, #0000 50%), linear-gradient(#c4877c, #7f4038);
       box-shadow: 0 0 0 2px #fff, 0 0 0 3px #6a0d04, 0 2px 4px #0009;
     }
-    body.touch-device #upgrade .auto.on { background: linear-gradient(#ffffff50, #ffffff10 50%, #0000 52%), linear-gradient(#6ad83a, #1e7a00); }
+    body.touch-device #upgrade .auto.on { background: linear-gradient(#ffffff50, #ffffff10 50%, #0000 52%), linear-gradient(#9fbb86, #4c6b3d); }
     body.touch-device #upgrade .auto { color: #fff; }
     body.touch-device #upgrade .stat { border-radius: 8px; background: #0004; box-shadow: inset 0 1px 3px #000a, 0 1px 0 #ffffff20; color: #fff1d6; }
-    body.touch-device #upgrade .choose { font: 400 16px/1.2 var(--sk-display); color: #ffe6a0; letter-spacing: 2px; animation: upRow 300ms ease-out 120ms both; }
+    body.touch-device #upgrade .choose { font: 400 16px/1.2 var(--sk-display); color: #e6d6ae; letter-spacing: 2px; animation: upRow 300ms ease-out 120ms both; }
     body.touch-device #upgrade .choose small { font: 600 11px/1.3 var(--sk-font); }
     body.touch-device #upgrade .card {
       border-radius: 12px; color: #fff1d6;
       background: var(--noise), linear-gradient(170deg, color-mix(in srgb, var(--accent) 28%, #3a2313), #22140a 75%);
       box-shadow: inset 0 2px 5px #000a, 0 1px 0 #ffffff25; outline: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -5px;
     }
-    body.touch-device #upgrade .card.autopick { box-shadow: inset 0 2px 5px #000a, 0 0 0 2px #7dff8a, 0 0 12px #7dff8a88; }
+    body.touch-device #upgrade .card.autopick { box-shadow: inset 0 2px 5px #000a, 0 0 0 2px #9fbb86; }
     body.touch-device #upgrade .badge {
       transform: none; border-radius: 4px 12px 12px 4px; padding: 2px 10px 2px 6px; font: 400 11px/1.3 var(--sk-display); letter-spacing: 1px;
       background: linear-gradient(#ffffff60, #0000 60%), var(--accent); color: #2a1803; box-shadow: 0 2px 2px #0008;
@@ -1116,74 +1116,74 @@
     body.touch-device #upgrade .cname { font: 400 clamp(15px, 4.5vmin, 19px)/1.1 var(--sk-display); letter-spacing: .5px; text-shadow: 0 -1px 0 #000; }
     body.touch-device #upgrade .card p { font: 500 11px/1.35 var(--sk-font); }
     body.touch-device #upgrade .card button {
-      border-radius: 22px; color: #fff; filter: none; font: 400 16px/1 var(--sk-display); letter-spacing: 1px; text-shadow: 0 -1px 0 #1e5a00;
-      background: linear-gradient(#ffffffa0, #ffffff20 48%, #0000 50%), linear-gradient(#a6f56a, #3a9a10);
-      box-shadow: 0 0 0 2px #fff, 0 0 0 3px #2a6a08, 0 3px 4px #0009;
+      border-radius: 22px; color: #fff; filter: none; font: 400 16px/1 var(--sk-display); letter-spacing: 1px; text-shadow: 0 -1px 0 #34492b;
+      background: linear-gradient(#ffffff60, #ffffff14 48%, #0000 50%), linear-gradient(#a9c290, #557548);
+      box-shadow: 0 0 0 2px #fff, 0 0 0 3px #3f5634, 0 3px 4px #0009;
     }
-    body.touch-device #upgrade .card button .price { color: #fff36b; }
+    body.touch-device #upgrade .card button .price { color: #efe2b0; }
     body.touch-device #upgrade .card.poor button { background: linear-gradient(#ffffff60, #ffffff10 48%, #0000 50%), linear-gradient(#aaa, #666); text-shadow: 0 -1px 0 #333; box-shadow: 0 0 0 2px #ddd, 0 0 0 3px #444; }
     body.touch-device #upgrade .card.poor button .price { color: #ffb0a0; }
     body.touch-device #upgrade .card button.pin { border-radius: 12px; font: 800 10px/1 var(--sk-font); text-shadow: none; background: #0005; box-shadow: inset 0 1px 3px #000a; color: #fff1d6; }
-    body.touch-device #upgrade .card button.pin.on { color: #7dff8a; box-shadow: inset 0 1px 3px #000a, 0 0 0 1px #7dff8a; }
-    body.touch-device #upgrade .sell { border-radius: 20px; background: linear-gradient(#ffffff80, #ffffff10 48%, #0000 50%), linear-gradient(#ff7a6a, #b3150c); color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #6a0d04, 0 2px 4px #0009; }
-    body.touch-device #upgrade .sell .price { color: #fff36b; }
+    body.touch-device #upgrade .card button.pin.on { color: #b4d29c; box-shadow: inset 0 1px 3px #000a, 0 0 0 1px #9fbb86; }
+    body.touch-device #upgrade .sell { border-radius: 20px; background: linear-gradient(#ffffff50, #ffffff0c 48%, #0000 50%), linear-gradient(#c4877c, #7f4038); color: #fff; box-shadow: 0 0 0 2px #fff, 0 0 0 3px #6a0d04, 0 2px 4px #0009; }
+    body.touch-device #upgrade .sell .price { color: #efe2b0; }
     body.touch-device #upgrade .kills, body.touch-device #upgrade .up-msg { font-family: var(--sk-font); color: #fff1d6; }
 
     /* ---------- Main menu: a parchment card in a wooden frame on a wooden wall ---------- */
     body.touch-device #mainmenu {
       font-family: var(--sk-font);
-      background: var(--noise), repeating-linear-gradient(90deg, #0000 0 calc(25vw - 3px), #2a1505 calc(25vw - 3px) 25vw), var(--grain), linear-gradient(#9a6230, #6d3f17);
+      background: var(--noise), repeating-linear-gradient(90deg, #0000 0 calc(25vw - 3px), #2a2016 calc(25vw - 3px) 25vw), var(--grain), linear-gradient(#7a604a, #54422f);
     }
     body.touch-device #mainmenu::after { content: none; }
     body.touch-device #mainmenu .mm-titlebar, body.touch-device #mainmenu .mm-foot { display: none; }
     body.touch-device #mainmenu .mm-card {
       border-radius: 10px; padding: 18px 18px 16px; color: #3a2203;
-      background: var(--noise), radial-gradient(120% 90% at 50% 40%, #fbf1d6, #ead6a6);
-      box-shadow: 0 0 0 7px #6d3f17, 0 0 0 9px #3a1c06, inset 0 0 30px #b8904a88, 0 14px 30px #000c;
+      background: var(--noise), radial-gradient(120% 90% at 50% 40%, #f4ecda, #ddd0b2);
+      box-shadow: 0 0 0 7px #5e4834, 0 0 0 9px #33261a, inset 0 0 30px #b8904a88, 0 14px 30px #000c;
     }
     body.touch-device #mainmenu h1 {
       font: 400 clamp(52px, 16vw, 80px)/1 var(--sk-display); letter-spacing: 1px; margin: 4px 0 0;
-      background-image: linear-gradient(#fff6b0, #ffd23d 45%, #ff8a00); -webkit-text-stroke: 3px #5a2d00;
-      filter: drop-shadow(0 4px 0 #5a2d00) drop-shadow(0 6px 6px #0006); animation: skBob 1.6s ease-in-out infinite alternate;
+      background-image: linear-gradient(#f2e6c0, #d4b46a 45%, #a8783c); -webkit-text-stroke: 3px #4a321c;
+      filter: drop-shadow(0 4px 0 #4a321c) drop-shadow(0 6px 6px #0006); animation: skBob 1.6s ease-in-out infinite alternate;
     }
-    body.touch-device #mainmenu h1 span { background-image: linear-gradient(#e0f4ff, #6fc8ff 45%, #1a6ad8); }
+    body.touch-device #mainmenu h1 span { background-image: linear-gradient(#e2ebf0, #93b0c4 45%, #4c6782); }
     /* Every iPhone game was "HD". */
     body.touch-device #mainmenu h1::after {
       content: 'HD'; top: -14px; right: 0; width: 46px; height: 46px; border-radius: 50%; clip-path: none;
-      background: linear-gradient(#ffffff90, #ffffff10 48%, #0000 50%), linear-gradient(#ff6a5a, #b3150c); -webkit-text-fill-color: #fff; color: #fff;
+      background: linear-gradient(#ffffff50, #ffffff0c 48%, #0000 50%), linear-gradient(#c4877c, #7f4038); -webkit-text-fill-color: #fff; color: #fff;
       font: 400 18px/1 var(--sk-display); box-shadow: 0 0 0 2px #fff, 0 3px 4px #0008; animation: none; transform: rotate(14deg);
     }
     body.touch-device #mainmenu .mm-tag { font: italic 700 15px/1.3 Georgia, "Times New Roman", serif; color: #6a3a10; }
     body.touch-device #mainmenu .mm-tag::before, body.touch-device #mainmenu .mm-tag::after { content: none; }
     body.touch-device #mainmenu h2 {
-      margin: 0 auto; padding: 4px 26px; border-radius: 3px; color: #fff; background: linear-gradient(#e84a3a, #a01a10);
+      margin: 0 auto; padding: 4px 26px; border-radius: 3px; color: #fff; background: linear-gradient(#b0766a, #7a4038);
       font: 400 20px/1.2 var(--sk-display); letter-spacing: 2px; text-shadow: 0 -1px 0 #5a0800; box-shadow: 0 2px 3px #0006;
     }
     body.touch-device #mainmenu label { color: #5a3410; font: 800 11px/1.2 var(--sk-font); letter-spacing: 1.5px; }
     body.touch-device #mainmenu input, body.touch-device #mainmenu textarea {
       border-radius: 10px; background: #fffdf6; box-shadow: inset 0 2px 4px #0005, 0 1px 0 #fff; font-family: var(--sk-font);
     }
-    body.touch-device #mainmenu input:focus, body.touch-device #mainmenu textarea:focus { box-shadow: inset 0 2px 4px #0005, 0 0 0 2px #4a90e8; }
+    body.touch-device #mainmenu input:focus, body.touch-device #mainmenu textarea:focus { box-shadow: inset 0 2px 4px #0005, 0 0 0 2px #7d98b0; }
     body.touch-device #mainmenu button {
       border-radius: 12px; color: #fff; font: 400 clamp(13px, 3.8vw, 16px)/1.1 var(--sk-display); letter-spacing: 0; text-shadow: 0 -1px 0 #0008;
-      background: linear-gradient(#ffffff60, #ffffff10 48%, #0000 50%), linear-gradient(#a8784a, #6a4020);
+      background: linear-gradient(#ffffff60, #ffffff10 48%, #0000 50%), linear-gradient(#958068, #5f4c3a);
       box-shadow: 0 0 0 1px #3a1c06, inset 0 1px 0 #ffffff60, 0 3px 0 #3a1c06, 0 5px 6px #0005;
     }
     body.touch-device #mainmenu button:active { transform: translateY(3px); padding-top: 8px; box-shadow: 0 0 0 1px #3a1c06, inset 0 2px 4px #0006; }
     body.touch-device #mainmenu button:disabled { color: #fffa; text-shadow: none; filter: grayscale(1) opacity(.6); }
     body.touch-device #mainmenu button:focus-visible { outline: 2px solid #4a90e8; outline-offset: 2px; }
     body.touch-device #mainmenu .primary {
-      border: 0; border-radius: 28px; font: 400 26px/1.1 var(--sk-display); letter-spacing: 1px; filter: none; color: #fff; text-shadow: 0 -2px 0 #1e5a00;
-      background: linear-gradient(#ffffffa0, #ffffff20 48%, #0000 50%), linear-gradient(#a6f56a, #3a9a10);
-      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #2a6a08, 0 5px 0 4px #1d4a04, 0 8px 12px #0007;
+      border: 0; border-radius: 28px; font: 400 26px/1.1 var(--sk-display); letter-spacing: 1px; filter: none; color: #fff; text-shadow: 0 -2px 0 #34492b;
+      background: linear-gradient(#ffffff60, #ffffff14 48%, #0000 50%), linear-gradient(#a9c290, #557548);
+      box-shadow: 0 0 0 3px #fff, 0 0 0 5px #3f5634, 0 5px 0 4px #2c3d25, 0 8px 12px #0007;
     }
     body.touch-device #mainmenu .mm-small, body.touch-device #mainmenu .mm-status { color: #5a3410; }
     body.touch-device #mainmenu .mm-step, body.touch-device #mainmenu li { border-radius: 10px; background: #fff8e6; box-shadow: inset 0 1px 3px #0004; color: #3a2203; }
-    body.touch-device #mainmenu .mm-step b, body.touch-device #mainmenu .mm-label { color: #a01a10; }
+    body.touch-device #mainmenu .mm-step b, body.touch-device #mainmenu .mm-label { color: #7a4038; }
     body.touch-device #mainmenu .mm-room { border-radius: 12px; border: 2px dashed #a0703a; background: #fff8e6; }
-    body.touch-device #mainmenu .mm-room b { font: 400 46px/1.1 var(--sk-display); color: #a01a10; }
-    body.touch-device #mainmenu .mm-farms button { box-shadow: 0 0 0 2px #3a9a10, inset 0 1px 0 #ffffff60, 0 3px 0 #1d4a04; }
-    body.touch-device #mainmenu details.mm-manual summary { color: #1a5ad8; }
+    body.touch-device #mainmenu .mm-room b { font: 400 46px/1.1 var(--sk-display); color: #7a4038; }
+    body.touch-device #mainmenu .mm-farms button { box-shadow: 0 0 0 2px #6f8f5f, inset 0 1px 0 #ffffff60, 0 3px 0 #2c3d25; }
+    body.touch-device #mainmenu details.mm-manual summary { color: #4c6782; }
     @media (prefers-reduced-motion: reduce) {
       body.touch-device #touch *, body.touch-device #mainmenu h1 { animation: none !important; }
     }
