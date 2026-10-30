@@ -1185,6 +1185,19 @@
     body.touch-device #mainmenu .mm-room b { font: 400 46px/1.1 var(--sk-display); color: #7a4038; }
     body.touch-device #mainmenu .mm-farms button { box-shadow: 0 0 0 2px #6f8f5f, inset 0 1px 0 #ffffff60, 0 3px 0 #2c3d25; }
     body.touch-device #mainmenu details.mm-manual summary { color: #4c6782; }
+    /* Landscape tower shelf: one row that always fits. Tiles share whatever width is left of the thumb cluster
+       (leaving the stick its side of the screen), so a sixth tower can never wrap onto a second row and the plank
+       hugs the tiles instead of stretching to a max-width. */
+    @media (orientation: landscape) {
+      body.touch-device #hud [data-hud=buildbar] {
+        display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 5px; box-sizing: border-box;
+        max-width: none; width: min(calc(100vw - var(--cluster-w) - 18vw - var(--sl) - var(--sr) - var(--gap)), 460px);
+      }
+      body.touch-device #hud [data-hud=buildbar] .slot {
+        width: auto; min-height: 0; aspect-ratio: 1; padding: 3px 1px; overflow: hidden; min-width: 0;
+        font-size: clamp(9px, 2.7vmin, 12px);
+      }
+    }
     @media (prefers-reduced-motion: reduce) {
       body.touch-device #touch *, body.touch-device #mainmenu h1 { animation: none !important; }
     }
