@@ -59,6 +59,24 @@ export function touchButtonState(game, build, upgradeOpen = false) {
 }
 
 /**
+ * The one context button that replaced BUILD / UPGRADE / SELL on touch. Looking
+ * at a tower (and not aiming a buildable ghost) means UPGRADE, which opens the
+ * sheet that also sells; a picked tower means BUILD; with the sheet open it
+ * closes it. `mode` is what a tap does; label / sub / icon are what it shows.
+ */
+export function actionState(game, build, upgradeOpen = false) {
+  const st = touchButtonState(game, build, upgradeOpen);
+  if (upgradeOpen) return { mode: 'close', icon: '✕', label: 'CLOSE', sub: 'upgrades', dim: false, bad: false };
+  const ghostOk = build.selected !== null && !!build.preview && build.preview.ok;
+  if (build.lookTower && !ghostOk) {
+    const maxed = st.upgrade.sub === 'MAXED';
+    return { mode: 'upgrade', icon: maxed ? '★' : '▲', label: maxed ? 'TOWER' : 'UPGRADE', sub: maxed ? 'maxed · sell' : st.upgrade.sub, dim: false, bad: false };
+  }
+  if (build.selected !== null) return { mode: 'build', icon: '🔨', label: 'BUILD', sub: st.place.sub, dim: false, bad: st.place.bad };
+  return { mode: 'idle', icon: '🔨', label: 'BUILD', sub: 'pick a tower', dim: true, bad: false };
+}
+
+/**
  * Keep receiving a finger's moves after it leaves the element. Only a nicety
  * for drags: the browser throws InvalidStateError for a pointer that is
  * already gone (a very quick tap), and that must never stop the button's action.
@@ -189,8 +207,13 @@ export class TouchControls {
       // Toggle, not hold: crouch-jumping needs stick + jump + crouch, and a
       // phone held in two hands has two thumbs.
       case 'crouch': this.crouchOn = !this.crouchOn; break;
-      // Building: tap a tower in the bar to pick it, BUILD places the ghost, SELL
-      // removes the tower you're looking at. Everything else lives in the pause menu.
+      // Building: tap a tower on the shelf to pick it, ACTION builds it, or
+      // upgrades / sells (via the sheet) the tower you're looking at.
+      case 'action':
+        // Idle goes to place too: it tells you to pick a tower first.
+        if (this.actionMode === 'upgrade' || this.actionMode === 'close') this.input.handlers.upgrade?.();
+        else this.input.handlers.place?.();
+        break;
       case 'place': this.input.handlers.place?.(); break;
       case 'sell': this.input.handlers.sell?.(); break;
       case 'upgrade': this.input.handlers.upgrade?.(); break;
@@ -211,14 +234,26 @@ export class TouchControls {
 
   syncButtons() {
     this.buttons.crouch.classList.toggle('on', this.crouchOn);
-    this.setSub('crouch', this.crouchOn ? 'ON' : 'tap on/off');
+    this.setSub('crouch', this.crouchOn ? 'ON' : 'OFF');
   }
 
   /** Per-frame: relabel BUILD / SELL and show or hide NEXT WAVE from the game state. */
   syncGame(game, build, upgradeOpen = false) {
     const st = touchButtonState(game, build, upgradeOpen);
+    const act = this.buttons.action;
+    if (act) {
+      const a = actionState(game, build, upgradeOpen);
+      this.actionMode = a.mode;
+      this.setSub('action', a.sub);
+      this.setText(act, 'b', a.label);
+      this.setText(act, 'i', a.icon);
+      this.setFlag(act, 'dim', a.dim);
+      this.setFlag(act, 'bad', a.bad);
+      if (this.shown['action.mode'] !== a.mode) { this.shown['action.mode'] = a.mode; act.dataset.mode = a.mode; }
+    }
     for (const name of ['place', 'sell', 'upgrade']) {
       const b = this.buttons[name], v = st[name];
+      if (!b) continue;
       this.setSub(name, v.sub);
       this.setFlag(b, 'dim', v.dim);
       this.setFlag(b, 'bad', !!v.bad);
@@ -227,19 +262,25 @@ export class TouchControls {
     this.setFlag(this.buttons.wave, 'hidden', st.wave.hidden);
     if (this.buttons.ff) {
       this.setFlag(this.buttons.ff, 'on', st.ff.on);
-      if (this.shown['ff.label'] !== st.ff.label) {
-        this.shown['ff.label'] = st.ff.label;
-        const b = this.buttons.ff.querySelector('b');
-        if (b) b.textContent = st.ff.label;
-      }
+      // The round dock button only has room for the multiplier.
+      this.setText(this.buttons.ff, 'small', st.ff.label.replace('▶▶ ', ''));
+      if (this.buttons.ff.querySelector('i') === null) this.setText(this.buttons.ff, 'b', st.ff.label);
     }
+  }
+
+  setText(btn, sel, text) {
+    const key = `${btn.dataset.touch}.${sel}`;
+    if (this.shown[key] === text) return;
+    this.shown[key] = text;
+    const el = btn.querySelector(sel);
+    if (el) el.textContent = text;
   }
 
   setSub(name, text) {
     const key = `${name}.sub`;
     if (this.shown[key] === text) return;
     this.shown[key] = text;
-    const el = this.buttons[name].querySelector('small');
+    const el = this.buttons[name]?.querySelector('small');
     if (el) el.textContent = text;
   }
 
