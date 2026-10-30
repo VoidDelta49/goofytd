@@ -339,14 +339,35 @@ function startGame({ map, seed = newSeed(), session = null }) {
   hudButton('restart', restartGame);
 
   // Tap a tower in the bar to pick it (tap it again to stop building); also works with a free mouse.
-  document.querySelector('[data-hud=buildbar]').addEventListener('pointerdown', (e) => {
+  // A finger that starts on the bar and then drags is a stick / look touch, not a tap: the bar covers part of
+  // the stick's side of the screen, and it must not swallow a thumb that wanders onto it.
+  const shelf = document.querySelector('[data-hud=buildbar]');
+  let shelfTap = null;
+  const pickSlot = (slot) => {
+    if (upgrades.isOpen) closeUpgrades(); // picking a tower to build means you're done upgrading
+    input.handlers.selectTower(Number(slot.dataset.n));
+  };
+  shelf.addEventListener('pointerdown', (e) => {
     const slot = e.target.closest('.slot');
     if (!slot || paused) return;
     e.preventDefault();
-    if (e.pointerType !== 'mouse') input.touch.enable();
-    if (upgrades.isOpen) closeUpgrades(); // picking a tower to build means you're done upgrading
-    input.handlers.selectTower(Number(slot.dataset.n));
+    if (e.pointerType === 'mouse') { pickSlot(slot); return; }
+    input.touch.enable();
+    shelfTap = { id: e.pointerId, slot, x: e.clientX, y: e.clientY };
   });
+  shelf.addEventListener('pointermove', (e) => {
+    if (!shelfTap || shelfTap.id !== e.pointerId || Math.hypot(e.clientX - shelfTap.x, e.clientY - shelfTap.y) < 10) return;
+    const { x, y } = shelfTap;
+    shelfTap = null;
+    input.touch.begin(e, x, y);
+  });
+  shelf.addEventListener('pointerup', (e) => {
+    if (!shelfTap || shelfTap.id !== e.pointerId) return;
+    const { slot } = shelfTap;
+    shelfTap = null;
+    pickSlot(slot);
+  });
+  shelf.addEventListener('pointercancel', () => { shelfTap = null; });
 
   // Bring back the farmer's auto-upgrade choice (the host's decides for a co-op match).
   try { if (isHost && localStorage.getItem(AUTO_KEY) === '1') submit({ k: 'auto', on: true }); } catch {}

@@ -25,11 +25,11 @@
         "./src/client/render.js": "./src/client/render.js?v=c6fadc3432",
         "./src/client/sfx-worklet.js": "./src/client/sfx-worklet.js?v=99fc5d0587",
         "./src/client/td-render.js": "./src/client/td-render.js?v=d311ff6b78",
-        "./src/client/touch.js": "./src/client/touch.js?v=d18ae2d146",
+        "./src/client/touch.js": "./src/client/touch.js?v=d219fdcbe6",
         "./src/client/upgrade-menu.js": "./src/client/upgrade-menu.js?v=e8e30fd00a",
         "./src/fixed-clock.js": "./src/fixed-clock.js?v=686451ec26",
         "./src/level.js": "./src/level.js?v=791f06864a",
-        "./src/main.js": "./src/main.js?v=b99274f5e3",
+        "./src/main.js": "./src/main.js?v=c1b12cdb60",
         "./src/net/discovery.js": "./src/net/discovery.js?v=dc2bd3fed0",
         "./src/net/lockstep.js": "./src/net/lockstep.js?v=93eca31ea4",
         "./src/net/peer.js": "./src/net/peer.js?v=33aa05ca05",
@@ -992,6 +992,7 @@
     body.touch-device #hud .boss-bar.angry .boss-fill { background: linear-gradient(#e6c0b0, #b0645a 45%, #7a3530); }
     body.touch-device #hud .boss-sub { font: 700 12px/1.3 var(--sk-font); }
 
+    body.touch-device #hud [data-hud=buildbar]:empty { display: none; }
     /* Tower shelf: a wooden plank with glossy app-icon tiles and gold coin prices. */
     body.touch-device #hud [data-hud=buildbar] {
       padding: 7px; border-radius: 12px; background: var(--wood);

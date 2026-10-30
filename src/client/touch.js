@@ -147,17 +147,27 @@ export class TouchControls {
       this.enable();
       return; // The "tap to play" tap only starts the game.
     }
+    this.begin(e, e.clientX, e.clientY);
+  }
+
+  /**
+   * Start tracking a finger as stick or look. `ox`/`oy` is where it first landed,
+   * so a touch that began on the tower shelf and turned out to be a drag can
+   * hand over to the stick centred on its starting point.
+   */
+  begin(e, ox, oy) {
     capture(this.canvas, e.pointerId);
     const hasStick = [...this.touches.values()].some((t) => t.role === 'stick');
-    const role = !hasStick && e.clientX < window.innerWidth * STICK_ZONE ? 'stick' : 'look';
-    this.touches.set(e.pointerId, { role, ox: e.clientX, oy: e.clientY, x: e.clientX, y: e.clientY });
+    const role = !hasStick && ox < window.innerWidth * STICK_ZONE ? 'stick' : 'look';
+    this.touches.set(e.pointerId, { role, ox, oy, x: ox, y: oy });
     if (role === 'stick') {
-      this.stickEl.style.left = `${e.clientX}px`;
-      this.stickEl.style.top = `${e.clientY}px`;
+      this.stickEl.style.left = `${ox}px`;
+      this.stickEl.style.top = `${oy}px`;
       this.knobEl.style.transform = '';
       this.stickEl.classList.add('on');
       this.stickHintEl.classList.add('gone');
     }
+    this.onMove(e);
   }
 
   onMove(e) {
