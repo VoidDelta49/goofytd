@@ -275,6 +275,53 @@ defineCow({
   weight: 0,
 });
 
+// Third batch of surprise-only cows.
+
+defineCow({
+  id: 'conga', name: 'Conga Cow', hp: 28, speed: 3.0, bounty: 4, damage: 4, radius: 0.5, scale: 0.95, color: 0xff6ad5,
+  weight: 0,
+});
+
+defineCow({
+  id: 'congaleader', name: 'Conga Leader', hp: 90, speed: 3.0, bounty: 12, damage: 6, radius: 0.55, scale: 1.1, color: 0xffe14d,
+  weight: 0,
+});
+
+defineCow({
+  // Stops every few seconds for a selfie, and everyone nearby stops to pose.
+  id: 'influencer', name: 'Influencer Cow', hp: 60, speed: 2.8, bounty: 15, damage: 6, radius: 0.55, scale: 1, color: 0xffa6e8,
+  weight: 0,
+});
+
+defineCow({
+  // Cardboard: lots of "health", takes no milk, pays nothing worth mentioning. Towers fall for it anyway.
+  id: 'decoy', name: 'Cardboard Cow', hp: 150, speed: 2.5, bounty: 1, damage: 0, radius: 0.55, scale: 1, color: 0xc49a6c,
+  weight: 0,
+});
+
+defineCow({
+  // Towers think it's a tall farmer and won't aim at it. Near the milk, the calves come out.
+  id: 'trenchcoat', name: 'Suspiciously Tall Farmer', hp: 30, speed: 3.0, bounty: 3, damage: 9, radius: 0.55, scale: 1.2, color: 0x6b5a3a,
+  friendly: true, splitInto: 'calf', splitCount: 3, weight: 0,
+});
+
+defineCow({
+  id: 'tourist', name: 'Tourist Cow', hp: 30, speed: 2.6, bounty: 6, damage: 3, radius: 0.55, scale: 1, color: 0x88ccff,
+  weight: 0,
+});
+
+defineCow({
+  // Everyone near it gets fired up (faster) until you end the speech.
+  id: 'speaker', name: 'Moo-tivational Speaker', hp: 70, speed: 2.4, bounty: 16, damage: 6, radius: 0.6, scale: 1.1, color: 0xff9a3c,
+  weight: 0,
+});
+
+defineCow({
+  // Several cows bolted together. Its HP is set from theirs when it forms.
+  id: 'mecha', name: 'MECHA-MOO', hp: 100, speed: 2.0, bounty: 30, damage: 20, radius: 1.0, scale: 2.2, color: 0x9aa8ff,
+  weight: 0,
+});
+
 /** Widest cow (m), so area queries can pad their reach by it. */
 export const MAX_COW_RADIUS = () => COW_TYPE_LIST.reduce((m, t) => Math.max(m, t.radius), 0);
 

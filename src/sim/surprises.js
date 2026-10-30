@@ -19,7 +19,8 @@
 //
 // See Game.rollSurprises / updateSurprises for the runner.
 
-import { COW_TYPE_LIST, COW_TYPES } from './cows.js';
+import { COW_TYPE_LIST, COW_TYPES, MAX_COW_RADIUS, waveMix, pickFromMix } from './cows.js';
+import { TOWER_FORMS } from './towers.js';
 
 export const SURPRISES = {};
 export const SURPRISE_LIST = [];
@@ -583,4 +584,558 @@ defineSurprise({
         }
       } },
   ],
+});
+
+// ---- the third batch: peak silliness --------------------------------------
+
+/** Steps calling fn(game, k) every `step` s from `from` to `to` (inclusive). */
+function every(from, to, step, fn) {
+  const out = [];
+  for (let k = 0, t = from; t <= to + 1e-9; k++, t = from + k * step) out.push({ at: t, call: (game) => fn(game, k) });
+  return out;
+}
+
+/** Can this cow be messed with? Not bosses, not the friendly ones, not the Cash Cow. */
+const ordinary = (t) => !t.boss && !t.friendly && t !== COW_TYPES.golden;
+const walking = (t) => ordinary(t) && t.altitude <= 0;
+
+/** Tip cow i over for `time` s (asleep, posing, collapsed: the sim can't tell). */
+function knockOver(game, i, time) {
+  game.cows.slowMult[i] = 0;
+  game.cows.slowTime[i] = Math.max(game.cows.slowTime[i], time);
+}
+
+/** Nearest cow to (x, z) within `reach` m passing `keep`, other than slot `not` and slots in `skip`; -1 if none. Ties to the lower slot. */
+function nearestCow(game, x, z, reach, keep = ordinary, not = -1, skip = null) {
+  const { cows } = game;
+  let best = -1, bestD = reach * reach;
+  for (let i = 0; i < cows.count; i++) {
+    if (i === not || skip?.has(i) || !keep(COW_TYPE_LIST[cows.type[i]])) continue;
+    const d = (cows.x[i] - x) ** 2 + (cows.z[i] - z) ** 2;
+    if (d < bestD || (best < 0 && d <= bestD)) { best = i; bestD = d; }
+  }
+  return best;
+}
+
+/** Slots of cows of type `id`, high to low. */
+const slotsOfType = (game, id) => fieldCows(game, (t) => t === COW_TYPES[id]);
+
+/** A random cow passing `keep`, or -1. */
+function randomCow(game, keep = ordinary) {
+  const pool = fieldCows(game, keep);
+  return pool.length ? pool[Math.floor(game.surpriseRng() * pool.length)] : -1;
+}
+
+defineSurprise({
+  id: 'conga', name: 'Conga Line', firstWave: 4, weight: 2,
+  script: ({ wave }) => [
+    { at: 0, say: 'Da-da-da-da-da-da-da HEY! A CONGA LINE! Take out the leader and the whole line falls over.' },
+    {
+      at: 0.5, spawn: 'congaleader', count: 1, from: 'random', hp: 1,
+      onKill: (game) => {
+        const line = slotsOfType(game, 'conga');
+        for (const i of line) knockOver(game, i, 4);
+        game.announce('conga', `The Conga Leader is down! ${line.length} dancers trip over each other.`);
+      },
+      onEscape: (game) => game.announce('conga', 'The Conga Leader danced right into your milk. The party never stops.'),
+    },
+    { at: 1.0, spawn: 'conga', count: 8 + wave, every: 0.35, from: 'same' },
+  ],
+});
+
+defineSurprise({
+  id: 'oppositeday', name: 'Opposite Day', firstWave: 4, weight: 1, delay: [3, 10],
+  script: () => [
+    { at: 0, say: "IT'S OPPOSITE DAY! For 10 seconds, cows that reach your milk bring you milk instead. Let them through?!",
+      call: (game) => game.startMilkGift(10) },
+    { at: 10, say: 'Opposite Day is over. (Or is it? Yes. It is.)' },
+  ],
+});
+
+defineSurprise({
+  id: 'prom', name: 'Prom Night', firstWave: 5, weight: 2, delay: [6, 14],
+  // The toughest cow on the field gets crowned: triple health, and a big prize for dethroning it.
+  script: ({ wave }) => {
+    const prize = 40 + 12 * wave;
+    return [{
+      at: 0, call: (game) => {
+        const { cows } = game;
+        const [id] = topCowIds(game, 1, (i) => cows.maxHp[i], (t, i) => ordinary(t) && !game.tracked.has(cows.id[i]));
+        if (id === undefined) { game.announce('prom', 'It was prom night, but no cows showed up. The punch bowl is untouched.'); return; }
+        const i = slotOf(game, id);
+        const name = COW_TYPE_LIST[cows.type[i]].name;
+        cows.maxHp[i] *= 3; cows.hp[i] *= 3;
+        game.tracked.set(id, {
+          onKill: (g) => g.announce('prom', `DETHRONED! The Prom Royalty is down. +${g.earn(prize)} moolah!`),
+          onEscape: (g) => g.announce('prom', 'The Prom Royalty sipped your milk like a champagne flute. Iconic.'),
+        });
+        game.announce('prom', `PROM NIGHT! A ${name} was crowned Prom Royalty: triple health. Dethrone it for ${prize} moolah!`, cows.x[i], cows.z[i]);
+      },
+    }];
+  },
+});
+
+defineSurprise({
+  id: 'hotpotato', name: 'Hot Potato', firstWave: 5, weight: 2, delay: [4, 10],
+  // A cow is handed a hot potato that hops to the nearest cow every 2 s, then goes off in the herd.
+  script: ({ wave }) => {
+    let holder = -1, x = 0, z = 0, done = false;
+    const find = (game) => {
+      let i = holder >= 0 ? slotOf(game, holder) : -1;
+      if (i < 0) i = nearestCow(game, x, z, 1e9); // dropped: whoever is closest picks it up
+      if (i >= 0) { holder = game.cows.id[i]; x = game.cows.x[i]; z = game.cows.z[i]; }
+      return i;
+    };
+    return [
+      { at: 0, say: 'HOT POTATO! One cow is holding a ticking spud. It keeps getting passed... until it doesn\'t.',
+        call: (game) => {
+          const i = randomCow(game);
+          if (i < 0) { done = true; game.announce('hotpotato', 'Nobody to hand the potato to. You eat it. Delicious.'); return; }
+          holder = game.cows.id[i]; x = game.cows.x[i]; z = game.cows.z[i];
+        } },
+      ...every(2, 12, 2, (game) => {
+        if (done) return;
+        let i = find(game);
+        if (i < 0) return;
+        const j = nearestCow(game, x, z, 8, ordinary, i);
+        if (j >= 0) { i = j; holder = game.cows.id[j]; x = game.cows.x[j]; z = game.cows.z[j]; }
+        game.events.push({ kind: 'splash', x, y: 1.8, z, radius: 0.8, color: 0xffa040 });
+      }),
+      { at: 14, call: (game) => {
+        if (done) return;
+        const i = find(game);
+        if (i < 0) { game.announce('hotpotato', 'The potato rolled away and went off in an empty field. Mashed.'); return; }
+        const kills = game.kills;
+        game.events.push({ kind: 'boom', x, z, radius: 4, wrecked: 0 });
+        game.splash(x, z, 4, (60 + 10 * wave) * game.hpScale, null);
+        game.announce('hotpotato', `KA-SPUD! The potato went off: ${game.kills - kills} cow${game.kills - kills === 1 ? '' : 's'} mashed.`, x, z);
+      } },
+    ];
+  },
+});
+
+defineSurprise({
+  id: 'lava', name: 'The Floor Is Lava', firstWave: 5, weight: 2, delay: [5, 12],
+  script: ({ wave }) => [
+    { at: 0, say: 'THE FLOOR IS LAVA! Every cow on the ground catches fire. The flying cows are being smug about it.',
+      call: (game) => {
+        for (const i of fieldCows(game, walking)) {
+          game.igniteCow(i, (4 + 0.6 * wave) * game.hpScale, 5, 0, 0);
+          game.events.push({ kind: 'splash', x: game.cows.x[i], y: 0.2, z: game.cows.z[i], radius: 0.7, color: 0xff5a1a });
+        }
+      } },
+  ],
+});
+
+defineSurprise({
+  id: 'influencer', name: 'Influencer', firstWave: 6, weight: 2,
+  // Every 2 s it stops for a selfie and every cow around it stops to pose: free shots, if you can stand it.
+  script: () => [
+    { at: 0, say: "OMG an INFLUENCER COW. Every few seconds it stops for a selfie and the cows nearby pose. Don't forget to like and subscribe." },
+    {
+      at: 1, spawn: 'influencer', count: 1, from: 'random',
+      onKill: (game) => game.announce('influencer', 'The Influencer has been UNFOLLOWED. Its 3 followers are devastated.'),
+      onEscape: (game) => game.announce('influencer', 'The Influencer posted a selfie with your milk. #blessed #stolen'),
+    },
+    ...every(3, 21, 2, (game) => {
+      const { cows } = game;
+      for (const v of slotsOfType(game, 'influencer')) {
+        const x = cows.x[v], z = cows.z[v];
+        game.events.push({ kind: 'splash', x, y: 2, z, radius: 1.6, color: 0xffffff });
+        knockOver(game, v, 1.2);
+        for (const i of fieldCows(game, walking)) {
+          if (i !== v && (cows.x[i] - x) ** 2 + (cows.z[i] - z) ** 2 <= 49) knockOver(game, i, 1.2);
+        }
+      }
+    }),
+  ],
+});
+
+defineSurprise({
+  id: 'stocks', name: 'Cow Stock Exchange', firstWave: 4, weight: 2,
+  // Bounties swing wildly every 3 s for 15 s.
+  script: () => {
+    const prices = [0.5, 1, 2, 3, 4];
+    return [
+      { at: 0, say: 'The MOO-DAQ is open! Cow prices are going to swing like crazy for 15 seconds. Buy low, shoot high!' },
+      ...every(1, 13, 3, (game) => {
+        const m = prices[Math.floor(game.surpriseRng() * prices.length)];
+        game.bountyMult = m;
+        game.bountyTime = 3.05;
+        game.announce('stocks', m < 1 ? `MOO-DAQ CRASH! Cows worth ×${m}. HOLD YOUR FIRE (or don't)!`
+          : m === 1 ? 'MOO-DAQ: flat. Cows at regular price. Boring.'
+          : `MOO-DAQ RALLY! Cows worth ×${m}! SELL SELL SELL (by shooting)!`);
+      }),
+      { at: 16, say: 'The MOO-DAQ is closed. Your portfolio is... cows.' },
+    ];
+  },
+});
+
+defineSurprise({
+  id: 'cardboard', name: 'Cardboard Decoys', firstWave: 5, weight: 2,
+  script: ({ wave }) => [
+    { at: 0, say: 'A suspicious herd is coming in... wait, are those CARDBOARD CUTOUTS? Your towers are falling for it!' },
+    { at: 0.5, spawn: 'decoy', count: 4 + Math.floor(wave / 3), every: 0.5, from: 'random' },
+    { at: 1.5, spawn: 'cow', mix: true, count: 3 + Math.floor(wave / 3), every: 0.5, from: 'same' },
+  ],
+});
+
+defineSurprise({
+  id: 'trenchcoat', name: 'Three Calves in a Trenchcoat', firstWave: 4, weight: 2,
+  // Towers think it's a farmer. Get it with splash before it gets close, or it pops open by the milk.
+  script: () => [
+    { at: 0, say: 'A very tall farmer in a trenchcoat is walking toward your milk. Totally normal. Nothing to see here.' },
+    { at: 1, spawn: 'trenchcoat', count: 1, from: 'random', hp: 1 },
+    ...every(1.5, 22, 0.5, (game) => {
+      for (const i of slotsOfType(game, 'trenchcoat')) {
+        if (game.cowPathDistance(i) > 25) continue;
+        const x = game.cows.x[i], z = game.cows.z[i];
+        game.burstCow(i);
+        game.announce('trenchcoat', 'IT WAS THREE CALVES IN A TRENCHCOAT THE WHOLE TIME!', x, z);
+      }
+    }),
+  ],
+});
+
+defineSurprise({
+  id: 'tipjar', name: 'Tip Jar', firstWave: 3, weight: 1,
+  script: ({ wave }) => [{
+    at: 0, call: (game) => {
+      const n = fieldCows(game, ordinary).length;
+      if (n === 0) { game.announce('tipjar', `An empty field left you a tip out of pity: ${game.earn(1)} moolah.`); return; }
+      const paid = game.earn(Math.min(2 * n, 60 + 5 * wave));
+      game.announce('tipjar', `For once, the cows tip YOU! ${n} cows chipped in ${paid} moolah. They still want your milk.`);
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'speedtrap', name: 'Speed Trap', firstWave: 5, weight: 2, delay: [5, 14],
+  // Every walker over the limit gets a ticket (you keep the fine) and a slow-down.
+  script: ({ wave }) => [{
+    at: 0, call: (game) => {
+      const { cows } = game;
+      let tickets = 0;
+      for (const i of fieldCows(game, walking)) {
+        const t = COW_TYPE_LIST[cows.type[i]];
+        const v = t.speed * (cows.slowTime[i] > 0 ? cows.slowMult[i] : 1);
+        if (v <= 4.5) continue;
+        tickets++;
+        game.slowCow(i, 0.5, 8);
+      }
+      game.announce('speedtrap', tickets
+        ? `WEE-OO WEE-OO! SPEED TRAP! ${tickets} cow${tickets === 1 ? '' : 's'} ticketed and slowed. You keep the fines: +${game.earn(tickets * (3 + Math.floor(wave / 4)))} moolah.`
+        : 'A cow cop set up a speed trap. Nobody was speeding. The cop eats a donut.');
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'godcow', name: 'Fairy Godcow', firstWave: 3, weight: 1,
+  script: ({ wave }) => [{
+    at: 0, call: (game) => {
+      const can = [...game.towers.values()].filter((t) => t.def.upgrades.length > 0);
+      if (can.length) {
+        const t = can[Math.floor(game.surpriseRng() * can.length)];
+        const form = game.autoNext(t.def), cost = TOWER_FORMS[form].upgradeCost;
+        game.money += cost; // she pays for it
+        if (game.upgradeTower(t.id, form).ok) {
+          game.announce('godcow', `A FAIRY GODCOW waved her wand: your ${t.def.name} got a free upgrade! Bibbidi-bobbidi-MOO.`, t.x, t.z);
+          return;
+        }
+        game.money -= cost;
+      }
+      game.announce('godcow', `A FAIRY GODCOW found nothing to upgrade, so she left ${game.earn(30 + 5 * wave)} moolah under your pillow.`);
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'tourists', name: 'Wrong Farm', firstWave: 3, weight: 2,
+  // Tourist cows wander in, realise they're at the wrong farm, and leave. Shoot them for cash before they go.
+  script: ({ wave }) => [
+    { at: 0, say: 'A tour bus! TOURIST COWS are taking photos of your towers. Bag a few before they leave!' },
+    { at: 0.5, spawn: 'tourist', count: 6 + Math.floor(wave / 2), every: 0.3, from: 'random' },
+    { at: 9, call: (game) => {
+      let n = 0;
+      for (const i of slotsOfType(game, 'tourist')) if (game.abductCow(i)) n++;
+      game.announce('tourists', n
+        ? `"...this is the WRONG FARM. We wanted the CHEESE farm." ${n} tourist${n === 1 ? '' : 's'} got back on the bus.`
+        : 'The tour bus left empty. Nobody got back on. You monster.');
+    } },
+  ],
+});
+
+defineSurprise({
+  id: 'gps', name: 'GPS Outage', firstWave: 4, weight: 2, delay: [5, 14],
+  script: () => [
+    { at: 0, say: 'The cow GPS satellite went down! The herd is walking in circles. "Recalculating..."', call: (game) => game.startGpsOutage(6) },
+    { at: 6, say: 'GPS is back. "In 200 metres, turn toward the milk."' },
+  ],
+});
+
+defineSurprise({
+  id: 'moshpit', name: 'Mosh Pit', firstWave: 6, weight: 2, delay: [5, 14],
+  // Crowded cows hurt each other: up to 60% of max HP for a cow with five or more neighbours.
+  script: () => [
+    { at: 0, say: 'Someone put on heavy metal. MOSH PIT! The more crowded the cows, the more they hurt each other.',
+      call: (game) => {
+        const { cows } = game;
+        const pad = MAX_COW_RADIUS();
+        const hurt = [];
+        for (const i of fieldCows(game, ordinary)) {
+          let n = 0;
+          for (const k of game.cowHash.near(cows, cows.x[i], cows.z[i], 2.5 + pad)) {
+            if (k !== i && (cows.x[k] - cows.x[i]) ** 2 + (cows.z[k] - cows.z[i]) ** 2 <= 2.5 * 2.5) n++;
+          }
+          if (n) hurt.push([i, 0.12 * Math.min(n, 5) * cows.maxHp[i]]);
+        }
+        let moshed = 0;
+        // fieldCows lists slots high to low, so kills never move an unhit cow into a slot still to come.
+        for (const [i, d] of hurt) { game.damageCow(i, d, null); moshed++; }
+        game.announce('moshpit', moshed ? `\\m/ ${moshed} cows moshed! \\m/` : 'Nobody moshed. The cows are standing too far apart. Lame.');
+      } },
+  ],
+});
+
+defineSurprise({
+  id: 'costume', name: 'Costume Party', firstWave: 5, weight: 2, delay: [5, 14],
+  // Every cow on the field dresses up as a random other cow from this wave (and keeps its share of health).
+  script: () => [
+    { at: 0, say: "COSTUME PARTY! Every cow out there just dressed up as a different cow. Don't trust anyone.",
+      call: (game) => {
+        const mix = waveMix(game.wave);
+        for (const i of fieldCows(game, ordinary)) game.setCowType(i, pickFromMix(mix, game.surpriseRng()));
+      } },
+  ],
+});
+
+defineSurprise({
+  id: 'icerink', name: 'Ice Rink', firstWave: 4, weight: 2, delay: [5, 14],
+  script: () => [
+    { at: 0, say: 'A cold snap froze the field into an ICE RINK! Cows are faster but can NOT take corners.', call: (game) => game.startIce(8) },
+    { at: 8, say: 'The ice melted. The cows are pretending that never happened.' },
+  ],
+});
+
+defineSurprise({
+  id: 'bowling', name: 'Cosmic Bowling', firstWave: 5, weight: 2, delay: [4, 12],
+  // A giant bowling ball rolls from a spawner down the cows' path to the milk, flattening walkers on the way.
+  script: ({ wave }) => {
+    let cell = -1, kills = 0, done = false;
+    return [
+      { at: 0, say: 'A GIANT BOWLING BALL is rolling down the lane! STEE-RIKE?',
+        call: (game) => {
+          const s = game.spawners[Math.floor(game.surpriseRng() * game.spawners.length)];
+          cell = s.cell; kills = game.kills;
+        } },
+      ...every(1, 9, 0.15, (game) => {
+        if (done || cell < 0) return;
+        const { grid } = game;
+        for (let k = 0; k < 2 && cell >= 0 && !grid.goal[cell]; k++) cell = grid.next[cell];
+        if (cell < 0 || grid.goal[cell]) {
+          done = true;
+          const n = game.kills - kills;
+          game.announce('bowling', n >= 8 ? `STEE-RIKE!!! ${n} cows bowled over!` : n >= 3 ? `Spare. ${n} cows down.` : n ? `${n} cow${n === 1 ? '' : 's'}. Bit of a gutter ball.` : 'Gutter ball. Not a single cow. Embarrassing.');
+          return;
+        }
+        const x = grid.centerX(cell), z = grid.centerZ(cell);
+        game.events.push({ kind: 'splash', x, y: 1, z, radius: 1.8, color: 0x2a2a6a });
+        game.splash(x, z, 1.8, (150 + 20 * wave) * game.hpScale, null);
+      }),
+    ];
+  },
+});
+
+defineSurprise({
+  id: 'yawn', name: 'Contagious Yawn', firstWave: 4, weight: 2, delay: [5, 14],
+  // One cow nods off, and the yawn spreads to every cow within 3 m of a sleeper, once a second.
+  script: () => {
+    const asleep = new Set();
+    const spread = (game) => {
+      const { cows } = game;
+      const sleepers = [];
+      for (let i = 0; i < cows.count; i++) if (asleep.has(cows.id[i])) sleepers.push(i);
+      for (const i of fieldCows(game, walking)) {
+        if (asleep.has(cows.id[i])) continue;
+        if (sleepers.some((s) => (cows.x[s] - cows.x[i]) ** 2 + (cows.z[s] - cows.z[i]) ** 2 <= 9)) {
+          asleep.add(cows.id[i]);
+          knockOver(game, i, 4);
+        }
+      }
+    };
+    return [
+      { at: 0, say: '*YAAAAWN* One cow yawned... oh no, it\'s CONTAGIOUS.',
+        call: (game) => {
+          const i = randomCow(game, walking);
+          if (i < 0) return;
+          asleep.add(game.cows.id[i]);
+          knockOver(game, i, 4);
+        } },
+      ...every(1, 6, 1, spread),
+      { at: 7, call: (game) => game.announce('yawn', asleep.size > 1 ? `${asleep.size} cows caught the yawn and took a nap. Zzz.` : 'Nobody caught the yawn. Tough crowd.') },
+    ];
+  },
+});
+
+defineSurprise({
+  id: 'bingo', name: 'Cow Bingo', firstWave: 4, weight: 2, delay: [5, 14],
+  // Every cow's ear tag ending in the drawn number is out (you get the bounty).
+  script: () => [{
+    at: 0, call: (game) => {
+      const n = Math.floor(game.surpriseRng() * 10);
+      let out = 0;
+      for (const i of fieldCows(game, ordinary)) {
+        if (game.cows.id[i] % 10 !== n) continue;
+        game.events.push({ kind: 'splash', x: game.cows.x[i], y: 1.4, z: game.cows.z[i], radius: 1, color: 0xff3af0 });
+        game.damageCow(i, Infinity, null);
+        out++;
+      }
+      game.announce('bingo', `B-I-N-G-O! The number is ${n}! Every cow with an ear tag ending in ${n} is OUT: ${out} cow${out === 1 ? '' : 's'}.`);
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'love', name: 'Love Is in the Air', firstWave: 5, weight: 2, delay: [5, 14],
+  // Pairs of cows standing close fall in love and run off together. They leave you a thank-you card.
+  script: ({ wave }) => [{
+    at: 0, call: (game) => {
+      const { cows } = game;
+      const used = new Set(), pairs = [];
+      const cap = 4 + Math.floor(wave / 3);
+      for (const i of fieldCows(game, walking).reverse()) {
+        if (pairs.length >= cap) break;
+        if (used.has(i)) continue;
+        const j = nearestCow(game, cows.x[i], cows.z[i], 2.2, walking, i, used);
+        if (j < 0) continue;
+        used.add(i); used.add(j);
+        pairs.push([cows.id[i], cows.id[j]]);
+      }
+      let gift = 0;
+      for (const pair of pairs) {
+        for (const id of pair) {
+          const i = slotOf(game, id);
+          if (i < 0) continue;
+          gift += COW_TYPE_LIST[cows.type[i]].bounty / 2;
+          game.events.push({ kind: 'splash', x: cows.x[i], y: 2, z: cows.z[i], radius: 1, color: 0xff5a8a });
+          game.abductCow(i);
+        }
+      }
+      game.announce('love', pairs.length
+        ? `<3 LOVE IS IN THE AIR <3 ${pairs.length} cow couple${pairs.length === 1 ? '' : 's'} ran off together. They left a thank-you card with ${game.earn(gift)} moolah.`
+        : 'Love was in the air, but every cow kept its distance. Very British.');
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'speaker', name: 'Moo-tivational Speaker', firstWave: 6, weight: 2,
+  // While it lives, every cow within 8 m is fired up (faster).
+  script: () => [
+    { at: 0, say: '"YOU CAN DO IT! BELIEVE IN YOUR MILK!" A MOO-TIVATIONAL SPEAKER is pumping up the herd. Shut it down!' },
+    {
+      at: 1, spawn: 'speaker', count: 1, from: 'random',
+      onKill: (game) => game.announce('speaker', 'The speech is over. Nobody was moo-tivated. The herd goes back to its slump.'),
+    },
+    ...every(2, 22, 1, (game) => {
+      const { cows } = game;
+      for (const v of slotsOfType(game, 'speaker')) {
+        for (const i of fieldCows(game, ordinary)) {
+          if (i !== v && (cows.x[i] - cows.x[v]) ** 2 + (cows.z[i] - cows.z[v]) ** 2 <= 64) game.slowCow(i, 1.5, 1.2);
+        }
+      }
+    }),
+  ],
+});
+
+defineSurprise({
+  id: 'combine', name: 'Cow-mbine!', firstWave: 7, weight: 2, delay: [5, 14],
+  // Up to five cows standing together bolt into one MECHA-MOO with all their health.
+  script: () => [
+    { at: 0, say: 'Cows... ASSEMBLE! Five cows are forming a MECHA-MOO!' },
+    { at: 2, call: (game) => {
+      const { cows } = game;
+      const seed = randomCow(game, walking);
+      const parts = [];
+      if (seed >= 0) {
+        const x = cows.x[seed], z = cows.z[seed];
+        for (const i of fieldCows(game, walking)) {
+          const d = (cows.x[i] - x) ** 2 + (cows.z[i] - z) ** 2;
+          if (d <= 36) parts.push({ id: cows.id[i], d });
+        }
+        parts.sort((a, b) => a.d - b.d || a.id - b.id).splice(5);
+      }
+      if (parts.length < 3) { game.announce('combine', 'The cows tried to combine, but there weren\'t enough of them. Awkward high-fives all round.'); return; }
+      let hp = 0, x = 0, z = 0;
+      const first = slotOf(game, parts[0].id), fx = cows.x[first], fz = cows.z[first];
+      for (const { id } of parts) {
+        const i = slotOf(game, id);
+        hp += cows.hp[i]; x += cows.x[i]; z += cows.z[i];
+        game.abductCow(i);
+      }
+      x /= parts.length; z /= parts.length;
+      const c = game.grid.cellAt(x, z);
+      if (c < 0 || !game.grid.walkable(c)) { x = fx; z = fz; } // the middle of the huddle is a wall: build it where the closest one stood
+      // Built from the split stream: it's made of cows already on the field, not a new arrival.
+      const j = game.spawnCow(COW_TYPES.mecha, x, z, hp, game.splitRng, 0);
+      game.events.push({ kind: 'splash', x, y: 1.5, z, radius: 2.5, color: 0x9aa8ff });
+      game.announce('combine', j >= 0 ? `MECHA-MOO ONLINE! ${parts.length} cows, ${Math.round(hp)} HP of pure beef robot.` : 'The Mecha-Moo fell apart before it could stand up.', x, z);
+    } },
+  ],
+});
+
+defineSurprise({
+  id: 'gale', name: 'Gale Force', firstWave: 6, weight: 1, delay: [5, 14],
+  // Flying cows are blown 20 m back, away from the milk.
+  script: () => [{
+    at: 0, call: (game) => {
+      const { cows, grid } = game;
+      let n = 0;
+      for (const i of fieldCows(game, (t) => ordinary(t) && t.altitude > 0)) {
+        const dx = cows.x[i] - game.milkX, dz = cows.z[i] - game.milkZ, len = Math.hypot(dx, dz) || 1;
+        for (const push of [20, 10]) {
+          const x = cows.x[i] + (dx / len) * push, z = cows.z[i] + (dz / len) * push;
+          if (grid.cellAt(x, z) < 0) continue;
+          game.teleportCow(i, x, z);
+          n++;
+          break;
+        }
+      }
+      game.announce('gale', n
+        ? `GALE FORCE WINDS! ${n} flying cow${n === 1 ? '' : 's'} blown way back. Wheeeee!`
+        : 'A huge gust blew through. No flying cows to blow away. A farmer lost a hat, though.');
+    },
+  }],
+});
+
+defineSurprise({
+  id: 'icecream', name: 'Ice Cream Truck', firstWave: 5, weight: 2, delay: [4, 12],
+  // The jingle pulls every walker within 12 m into a tight crowd round the truck for 5 s. Splash time.
+  script: () => {
+    let p = null;
+    return [
+      { at: 0, say: '♪ Do-do-do-do-dooo ♪ The ICE CREAM TRUCK is here! The cows are queueing up. Perfect splash target.',
+        call: (game) => {
+          const i = randomCow(game, walking);
+          p = i >= 0 ? { x: game.cows.x[i], z: game.cows.z[i] } : game.dropPoint();
+          if (p) game.events.push({ kind: 'splash', x: p.x, y: 1.2, z: p.z, radius: 2, color: 0xffb8e0 });
+        } },
+      ...every(0.1, 5, 0.1, (game) => {
+        if (!p) return;
+        const { cows, grid } = game;
+        for (const i of fieldCows(game, walking)) {
+          const dx = p.x - cows.x[i], dz = p.z - cows.z[i], d = Math.hypot(dx, dz);
+          if (d > 12) continue;
+          if (d > 0.8) {
+            const x = cows.x[i] + (dx / d) * 0.2, z = cows.z[i] + (dz / d) * 0.2;
+            const c = grid.cellAt(x, z);
+            if (c >= 0 && grid.walkable(c)) game.teleportCow(i, x, z);
+          }
+          game.slowCow(i, 0.2, 0.4);
+        }
+      }),
+      { at: 5.5, say: 'The ice cream truck drove off. The cows are sad and lactose-confused.' },
+    ];
+  },
 });

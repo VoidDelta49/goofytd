@@ -200,6 +200,12 @@ export class Game {
     this.sightBoostTime = 0;
     /** Moonwalk: walking cows back away from the milk while moonwalkT > 0. */
     this.moonwalkT = 0;
+    /** GPS Outage: walkers go sideways (round in circles) while gpsT > 0. */
+    this.gpsT = 0;
+    /** Ice Rink: walkers are faster but can barely steer while iceT > 0. */
+    this.iceT = 0;
+    /** Opposite Day: cows reaching the milk fill it up instead while milkGiftT > 0. */
+    this.milkGiftT = 0;
   }
 
   /** Co-op: income × this (1 alone, 1.5 with two farmers, 2 with three, 2.5 with four). */
@@ -263,7 +269,7 @@ export class Game {
     if (paid) this.events.push({ kind: 'interest', amount: paid });
   }
 
-  get spawning() { return this.runs.length > 0 || this.bossQueue.length > 0 || this.spawners.some((s) => s.queue > 0); }
+  get spawning() { return this.runs.some(holdsWave) || this.bossQueue.length > 0 || this.spawners.some((s) => s.queue > 0); }
 
   // ---- bosses -------------------------------------------------------------
 
@@ -474,7 +480,9 @@ export class Game {
     if (!def) return false;
     const steps = def.script({ wave: Math.max(1, this.wave), rng: this.surpriseRng, game: this })
       .map((s, order) => ({ ...s, order })).sort((a, b) => a.at - b.at || a.order - b.order);
-    this.runs.push({ def, t: -delay, steps, next: 0, streams: [], at: null });
+    let lastSpawn = -1;
+    steps.forEach((s, k) => { if (s.spawn) lastSpawn = k; });
+    this.runs.push({ def, t: -delay, steps, next: 0, streams: [], at: null, lastSpawn });
     this.surpriseLog.push({ wave: this.wave, id: def.id });
     this.lastSurprise = def.id;
     return true;
@@ -633,6 +641,9 @@ export class Game {
     if (this.fireRateTime > 0 && (this.fireRateTime -= dt) <= 0) this.fireRate = 1;
     if (this.sightBoostTime > 0 && (this.sightBoostTime -= dt) <= 0) this.sightBoost = 1;
     if (this.moonwalkT > 0) this.moonwalkT -= dt;
+    if (this.gpsT > 0) this.gpsT -= dt;
+    if (this.iceT > 0) this.iceT -= dt;
+    if (this.milkGiftT > 0) this.milkGiftT -= dt;
     this.updateFog(dt);
     this.updateCows(dt);
     this.updateHeals(dt);
@@ -647,6 +658,8 @@ export class Game {
   updateCows(dt) {
     const { cows, grid } = this;
     const turn = Math.min(1, dt * 8);
+    // Ice Rink: hardly any grip, so cows overshoot every corner.
+    const iceTurn = Math.min(1, dt * 0.7);
     // Backwards, so remove() (which moves the last cow into slot i) never skips one.
     for (let i = cows.count - 1; i >= 0; i--) {
       const type = COW_TYPE_LIST[cows.type[i]];
@@ -656,8 +669,11 @@ export class Game {
       cows.hitAge[i] += dt;
       const cell = grid.cellAt(x, z);
       if (cell >= 0 && grid.goal[cell]) {
-        this.milk -= type.damage;
-        this.events.push({ kind: 'drink', x, z, id: cows.id[i] });
+        // Opposite Day: it brings milk instead of drinking it (never over a full tank).
+        const gift = this.milkGiftT > 0;
+        if (gift) this.milk = Math.min(this.cfg.milk, this.milk + type.damage);
+        else this.milk -= type.damage;
+        this.events.push({ kind: 'drink', x, z, id: cows.id[i], gift });
         cows.remove(i);
         continue;
       }
@@ -686,14 +702,24 @@ export class Game {
       let wx = len > 1e-9 ? (dx / len) * speed : 0;
       let wz = len > 1e-9 ? (dz / len) * speed : 0;
       // Moonwalk: walkers back away from the milk at half speed (never off the walkable cells).
-      const moon = this.moonwalkT > 0 && type.altitude <= 0 && !type.boss;
+      const walker = type.altitude <= 0 && !type.boss;
+      const moon = walker && this.moonwalkT > 0;
+      const gps = walker && this.gpsT > 0;
+      const ice = walker && this.iceT > 0;
       if (moon) { wx *= -0.5; wz *= -0.5; }
+      if (gps) {
+        // Turn the wish 90° (left or right by cow id): the herd walks in circles.
+        const sgn = cows.id[i] & 1 ? 1 : -1, ox = wx;
+        wx = -wz * sgn; wz = ox * sgn;
+      }
+      if (ice) { wx *= 1.3; wz *= 1.3; }
+      const k = ice ? iceTurn : turn;
       // Ease velocity toward the wish so turns at cell corners look like turning.
-      cows.vx[i] += (wx - cows.vx[i]) * turn;
-      cows.vz[i] += (wz - cows.vz[i]) * turn;
+      cows.vx[i] += (wx - cows.vx[i]) * k;
+      cows.vz[i] += (wz - cows.vz[i]) * k;
       cows.x[i] = x + cows.vx[i] * dt;
       cows.z[i] = z + cows.vz[i] * dt;
-      if (moon) {
+      if (moon || gps || ice) {
         const c = grid.cellAt(cows.x[i], cows.z[i]);
         if (c < 0 || !grid.walkable(c)) { cows.x[i] = x; cows.z[i] = z; cows.vx[i] = cows.vz[i] = 0; }
       }
@@ -881,6 +907,40 @@ export class Game {
     this.events.push({ kind: 'splash', x, y: 2, z, radius: 1.4, color: 0x7affd0 });
     cows.remove(i);
     return true;
+  }
+
+  /** GPS Outage: walkers wander sideways for `time` s. */
+  startGpsOutage(time) { this.gpsT = Math.max(this.gpsT, time); }
+
+  /** Ice Rink: walkers slide around for `time` s. */
+  startIce(time) { this.iceT = Math.max(this.iceT, time); }
+
+  /** Opposite Day: cows that reach the milk top it up for `time` s. */
+  startMilkGift(time) { this.milkGiftT = Math.max(this.milkGiftT, time); }
+
+  /**
+   * Pop cow i open on the spot (no bounty): what's inside (its splitInto)
+   * comes out. Only call while iterating cows backwards (or not at all).
+   */
+  burstCow(i) {
+    const { cows } = this;
+    const type = COW_TYPE_LIST[cows.type[i]];
+    const x = cows.x[i], z = cows.z[i];
+    this.tracked.delete(cows.id[i]);
+    cows.remove(i);
+    if (type.splitInto) this.splitCow(type, x, z);
+  }
+
+  /** Turn cow i into a `type` cow where it stands, keeping its share of health (Costume Party). Not for bosses. */
+  setCowType(i, type) {
+    const { cows } = this;
+    const frac = cows.maxHp[i] > 0 ? cows.hp[i] / cows.maxHp[i] : 1;
+    cows.type[i] = type.index;
+    cows.maxHp[i] = type.hp * this.hpScale;
+    cows.hp[i] = frac * cows.maxHp[i];
+    cows.abilityState[i] = ABILITY_COOLDOWN;
+    cows.abilityTime[i] = type.abilityCooldown * 0.5;
+    cows.version++;
   }
 
   /** Knock every walking cow over for `time` s (cow tipping): speed 0, overriding any slow. */
@@ -1341,6 +1401,14 @@ export class Game {
 }
 
 /** Squared XZ distance from (x, z) to the nearest point of box b (0 inside). */
+/**
+ * A surprise holds back the next wave until it has started and every cow it
+ * brings has spawned. After that its banners and effects play on into the gap.
+ */
+function holdsWave(run) {
+  return run.t < 0 || run.streams.length > 0 || run.next <= run.lastSpawn;
+}
+
 export function boxDist2(b, x, z) {
   const dx = x < b.min.x ? b.min.x - x : x > b.max.x ? x - b.max.x : 0;
   const dz = z < b.min.z ? b.min.z - z : z > b.max.z ? z - b.max.z : 0;

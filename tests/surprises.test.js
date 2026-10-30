@@ -347,3 +347,126 @@ test('surprises: Overclock and Super Moon wear off', () => {
   run(g, 16);
   assert(g.fireRate === 1 && g.sight === 1, 'still boosted');
 });
+
+// ---- third batch ----------------------------------------------------------
+
+const countOf = (g, id) => { let n = 0; for (let i = 0; i < g.cows.count; i++) if (g.cows.type[i] === COW_TYPES[id].index) n++; return n; };
+
+/** A tight huddle of `n` plain cows far from the milk. */
+function huddle(g, n, x = 0, z = -60, hp = 30) {
+  for (let k = 0; k < n; k++) g.cows.spawn(COW_TYPES.cow, x + (k % 3) * 0.6, z + Math.floor(k / 3) * 0.6, 0, 0);
+  for (let i = 0; i < g.cows.count; i++) g.cows.hp[i] = g.cows.maxHp[i] = hp;
+}
+
+test('surprises: the third batch is all there, and a long one only holds the wave until its cows are out', () => {
+  const third = ['conga', 'oppositeday', 'prom', 'hotpotato', 'lava', 'influencer', 'stocks', 'cardboard', 'trenchcoat',
+    'tipjar', 'speedtrap', 'godcow', 'tourists', 'gps', 'moshpit', 'costume', 'icerink', 'bowling', 'yawn', 'bingo',
+    'love', 'speaker', 'combine', 'gale', 'icecream'];
+  assert(third.length === 25 && third.every((id) => SURPRISES[id]), 'missing a third-batch surprise');
+  assert(SURPRISE_LIST.length === 70, `${SURPRISE_LIST.length} surprises`);
+  const g = quietGame();
+  g.queueSurprise('trenchcoat', 0.5);
+  assert(g.spawning, 'not holding before it starts');
+  run(g, 2);
+  assert(g.runs.length === 1 && !g.spawning, 'a running poll still holds the next wave');
+});
+
+test('surprises: Opposite Day fills the milk; Three Calves in a Trenchcoat pop out near it', () => {
+  const g = quietGame(9, { milk: 100 });
+  g.milk = 50;
+  g.startMilkGift(30);
+  g.spawnCow(COW_TYPES.cow, g.milkX + 10, g.milkZ, 30, g.surpriseRng);
+  run(g, 8);
+  assert(g.cows.count === 0 && g.milk === 55, `milk ${g.milk}`);
+
+  const h = quietGame();
+  h.placeTower('squirter', 6, -30);
+  h.queueSurprise('trenchcoat');
+  const events = run(h, 22);
+  const unmasked = events.findIndex((e) => e.id === 'trenchcoat' && /THREE CALVES/.test(e.text ?? ''));
+  assert(unmasked >= 0, 'never unmasked');
+  assert(!events.slice(0, unmasked).some((e) => e.kind === 'shot'), 'a tower shot at the "farmer"');
+  assert(countOf(h, 'calf') + h.kills >= 3, 'no calves came out');
+});
+
+test('surprises: drop the Conga Leader and the line falls over', () => {
+  const g = quietGame();
+  g.queueSurprise('conga');
+  run(g, 6);
+  const lead = slotOfType(g, 'congaleader');
+  assert(lead >= 0 && countOf(g, 'conga') > 5, 'no conga line');
+  g.damageCow(lead, 1e9, null);
+  g.watchTracked();
+  for (let i = 0; i < g.cows.count; i++) {
+    if (g.cows.type[i] === COW_TYPES.conga.index) assert(g.cows.slowMult[i] === 0 && g.cows.slowTime[i] > 0, 'a dancer kept dancing');
+  }
+});
+
+test('surprises: Bingo, Costume Party, Love and Cow-mbine reshape the herd', () => {
+  const g = quietGame();
+  huddle(g, 30);
+  const ids = [...g.cows.id.slice(0, g.cows.count)];
+  g.queueSurprise('bingo'); const ev = run(g, 0.02);
+  const n = Number(/number is (\d)/.exec(ev.find((e) => e.id === 'bingo').text)[1]);
+  const left = [...g.cows.id.slice(0, g.cows.count)];
+  assert(left.every((id) => id % 10 !== n) && ids.filter((id) => id % 10 !== n).every((id) => left.includes(id)), 'bingo hit the wrong cows');
+
+  const c = quietGame(13);
+  huddle(c, 12, 0, -60, 30);
+  c.cows.hp[0] = 15;
+  const id0 = c.cows.id[0];
+  c.queueSurprise('costume'); run(c, 0.02);
+  const types = new Set([...c.cows.type.slice(0, c.cows.count)]);
+  const i0 = [...Array(c.cows.count).keys()].find((k) => c.cows.id[k] === id0);
+  assert(types.size > 1, 'nobody changed costume');
+  assert(Math.abs(c.cows.hp[i0] / c.cows.maxHp[i0] - 0.5) < 1e-9, 'costume changed the health share');
+
+  const l = quietGame(9);
+  huddle(l, 6);
+  const money = l.money;
+  l.queueSurprise('love'); run(l, 0.02);
+  assert(l.cows.count === 0 && l.money > money, `love left ${l.cows.count}`);
+
+  const m = quietGame(9);
+  huddle(m, 5, 0, -60, 40);
+  m.queueSurprise('combine'); run(m, 2.05);
+  assert(m.cows.count === 1 && m.cows.type[0] === COW_TYPES.mecha.index && Math.abs(m.cows.hp[0] - 200) < 1, `mecha hp ${m.cows.hp[0]}`);
+});
+
+test('surprises: GPS Outage and Ice Rink keep cows on walkable cells; the yawn spreads; the bowling ball strikes', () => {
+  for (const id of ['gps', 'icerink']) {
+    const g = quietGame(9);
+    for (let k = 0; k < 20; k++) g.spawnCow(COW_TYPES.cow, g.spawners[k % 4].x, g.spawners[k % 4].z, 30, g.surpriseRng);
+    run(g, 3);
+    g.queueSurprise(id);
+    for (let t = 0; t < 8 * 64; t++) {
+      g.tick(DT);
+      for (let i = 0; i < g.cows.count; i++) assert(g.grid.walkable(g.grid.cellAt(g.cows.x[i], g.cows.z[i])), `${id}: off the walkable cells`);
+    }
+  }
+  const y = quietGame();
+  huddle(y, 12);
+  y.queueSurprise('yawn'); run(y, 7.1);
+  assert([...Array(y.cows.count).keys()].filter((i) => y.cows.slowMult[i] === 0).length >= 10, 'the yawn didn\'t spread');
+
+  const b = quietGame();
+  for (const s of b.spawners) for (let k = 0; k < 5; k++) b.spawnCow(COW_TYPES.cow, s.x, s.z, 30, b.surpriseRng);
+  run(b, 4);
+  const kills = b.kills;
+  b.queueSurprise('bowling'); run(b, 10);
+  assert(b.kills - kills >= 3, `bowling ball got ${b.kills - kills}`);
+});
+
+test('surprises: the Fairy Godcow upgrades a tower for free; the Hot Potato goes off', () => {
+  const g = quietGame();
+  const t = g.placeTower('squirter', 6, -30);
+  const def = t.def, money = g.money;
+  g.queueSurprise('godcow'); run(g, 0.02);
+  assert(t.def !== def && g.money === money, 'no free upgrade');
+
+  const h = quietGame();
+  huddle(h, 9);
+  h.queueSurprise('hotpotato');
+  const ev = run(h, 14.1);
+  assert(ev.some((e) => e.kind === 'boom') && h.kills > 0, 'the potato never went off');
+});
