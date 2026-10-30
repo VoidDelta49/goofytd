@@ -40,6 +40,7 @@
  *                state in Game.bosses, keyed by cow id
  *   upright      drawn standing on its hind legs (its own model)
  *   slowResist   0..1: this much of every slow is shrugged off (0.5 halves it)
+ *   friendly     towers never pick it as a target (splash and sprays still hit it)
  */
 export const COW_TYPES = {};
 /** Index -> type, so a cow stores its type as a small integer. */
@@ -62,7 +63,7 @@ export function defineCow(def) {
     name: def.id, scale: 1, color: 0xffffff, altitude: 0, blastRadius: 0, firstWave: 1, weight: 1,
     armor: 0, splitInto: null, splitCount: 0, enrageBelow: 0, enrageSpeed: 1, healRate: 0, healRadius: 0, camo: 0,
     ramDamage: 0, spitRange: 0, spitStun: 0, spitDamage: 0, windup: 0, abilityCooldown: 0,
-    boss: null, upright: false, slowResist: 0,
+    boss: null, upright: false, slowResist: 0, friendly: false,
     ...def, index: COW_TYPE_LIST.length,
   });
   COW_TYPES[def.id] = t;
@@ -200,6 +201,78 @@ defineCow({
 defineCow({
   id: 'megamama', name: 'Mega Mama', hp: 220, speed: 2.0, bounty: 20, damage: 20, radius: 0.95, scale: 2.0, color: 0xff9ec0,
   splitInto: 'mama', splitCount: 3, weight: 0,
+});
+
+// More surprise-only cows (see the second batch in surprises.js).
+
+defineCow({
+  id: 'ghost', name: 'Ghost Cow', hp: 18, speed: 3.4, bounty: 7, damage: 4, radius: 0.5, scale: 0.95, color: 0xe8f0ff,
+  altitude: 3, camo: 6, weight: 0,
+});
+
+defineCow({
+  // Flies straight over everything and goes off on the first tower it passes: shoot them down first.
+  id: 'kamikaze', name: 'Kamikaze Cow', hp: 14, speed: 4.6, bounty: 9, damage: 6, radius: 0.5, scale: 0.85, color: 0xff8a3a,
+  altitude: 2.5, blastRadius: 1.8, weight: 0,
+});
+
+defineCow({
+  id: 'balloon', name: 'Balloon Cow', hp: 140, speed: 1.6, bounty: 22, damage: 10, radius: 0.8, scale: 1.4, color: 0xff8a5c,
+  altitude: 7, weight: 0,
+});
+
+defineCow({
+  // Buttered up: slows slide right off (tipping still works).
+  id: 'greased', name: 'Greased Cow', hp: 50, speed: 4.0, bounty: 8, damage: 6, radius: 0.55, scale: 1, color: 0xfff3b0,
+  slowResist: 1, weight: 0,
+});
+
+defineCow({
+  // Heavy plate; dent it under 40% and it charges.
+  id: 'knight', name: 'Cow-valry Knight', hp: 90, speed: 2.4, bounty: 14, damage: 10, radius: 0.65, scale: 1.2, color: 0xd0d8e8,
+  armor: 9, enrageBelow: 0.4, enrageSpeed: 2, weight: 0,
+});
+
+defineCow({
+  id: 'blob', name: 'Blob Cow', hp: 60, speed: 2.6, bounty: 4, damage: 8, radius: 0.7, scale: 1.3, color: 0x9cf0e0,
+  splitInto: 'blobling', splitCount: 2, weight: 0,
+});
+
+defineCow({
+  id: 'blobling', name: 'Blobling', hp: 26, speed: 3.2, bounty: 3, damage: 4, radius: 0.5, scale: 0.9, color: 0x9cf0e0,
+  splitInto: 'blobette', splitCount: 2, weight: 0,
+});
+
+defineCow({
+  id: 'blobette', name: 'Blobette', hp: 10, speed: 3.8, bounty: 2, damage: 2, radius: 0.35, scale: 0.6, color: 0x9cf0e0,
+  weight: 0,
+});
+
+defineCow({
+  id: 'pinata', name: 'Piñata Cow', hp: 150, speed: 2.2, bounty: 5, damage: 10, radius: 0.75, scale: 1.4, color: 0xff66cc,
+  splitInto: 'calf', splitCount: 6, weight: 0,
+});
+
+defineCow({
+  // Kill it and the bottom half keeps coming.
+  id: 'zombie', name: 'Zombie Cow', hp: 45, speed: 2.2, bounty: 6, damage: 6, radius: 0.55, scale: 1, color: 0x8fae6a,
+  splitInto: 'crawler', splitCount: 1, weight: 0,
+});
+
+defineCow({
+  id: 'crawler', name: 'Zombie Cow (bottom half)', hp: 20, speed: 1.4, bounty: 3, damage: 3, radius: 0.45, scale: 0.7, color: 0x6f8e4a,
+  weight: 0,
+});
+
+defineCow({
+  // Towers won't aim at it; your splash and sprays still can. Takes no milk: it just wants its mum.
+  id: 'lostcalf', name: 'Lost Calf', hp: 30, speed: 3.0, bounty: 0, damage: 0, radius: 0.35, scale: 0.55, color: 0xffe0f0,
+  friendly: true, weight: 0,
+});
+
+defineCow({
+  id: 'alien', name: 'Moo-tant', hp: 40, speed: 3.8, bounty: 8, damage: 6, radius: 0.5, scale: 0.85, color: 0x7affd0,
+  weight: 0,
 });
 
 /** Widest cow (m), so area queries can pad their reach by it. */

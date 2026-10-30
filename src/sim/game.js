@@ -192,6 +192,14 @@ export class Game {
     this.bossCount = 0;
     /** Cow id -> live boss state (see bossAct). Insertion-ordered, so it iterates the same on every machine. */
     this.bosses = new Map();
+    /** Overclock: towers reload fireRate × as fast for fireRateTime s. */
+    this.fireRate = 1;
+    this.fireRateTime = 0;
+    /** Super Moon: towers see sightBoost × as far for sightBoostTime s (on top of any fog). */
+    this.sightBoost = 1;
+    this.sightBoostTime = 0;
+    /** Moonwalk: walking cows back away from the milk while moonwalkT > 0. */
+    this.moonwalkT = 0;
   }
 
   /** Co-op: income × this (1 alone, 1.5 with two farmers, 2 with three, 2.5 with four). */
@@ -482,8 +490,8 @@ export class Game {
     const r = this.surpriseRng;
     if (from === 'all') return this.spawners.map((s) => ({ x: s.x, z: s.z }));
     if (from === 'same' && run.at) return [run.at];
-    if (from === 'flank') {
-      const p = this.flankPoint();
+    if (from === 'flank' || from === 'drop') {
+      const p = from === 'flank' ? this.flankPoint() : this.dropPoint();
       if (p) return [p];
     }
     const s = this.spawners[Math.floor(r() * this.spawners.length)];
@@ -504,6 +512,19 @@ export class Game {
       const x = grid.centerX(i), z = grid.centerZ(i);
       if ((x - this.milkX) ** 2 + (z - this.milkZ) ** 2 < 30 * 30) continue;
       if (this.spawners.some((s) => (x - s.x) ** 2 + (z - s.z) ** 2 < 15 * 15)) continue;
+      return { x, z };
+    }
+    return null;
+  }
+
+  /** A walkable cell anywhere on the field with a path to the milk, at least 25 m from it (cows dropped from the sky). */
+  dropPoint() {
+    const { grid } = this, r = this.surpriseRng;
+    for (let tries = 0; tries < 60; tries++) {
+      const i = Math.floor(r() * grid.w * grid.h);
+      if (!grid.walkable(i) || grid.goal[i] || !(grid.dist[i] < Infinity)) continue;
+      const x = grid.centerX(i), z = grid.centerZ(i);
+      if ((x - this.milkX) ** 2 + (z - this.milkZ) ** 2 < 25 * 25) continue;
       return { x, z };
     }
     return null;
@@ -609,6 +630,9 @@ export class Game {
     this.updateAutoUpgrade(dt);
     this.updateSpawners(dt);
     if (this.bountyTime > 0 && (this.bountyTime -= dt) <= 0) this.bountyMult = 1;
+    if (this.fireRateTime > 0 && (this.fireRateTime -= dt) <= 0) this.fireRate = 1;
+    if (this.sightBoostTime > 0 && (this.sightBoostTime -= dt) <= 0) this.sightBoost = 1;
+    if (this.moonwalkT > 0) this.moonwalkT -= dt;
     this.updateFog(dt);
     this.updateCows(dt);
     this.updateHeals(dt);
@@ -659,13 +683,20 @@ export class Game {
         speed *= cows.slowMult[i];
         cows.slowTime[i] -= dt;
       }
-      const wx = len > 1e-9 ? (dx / len) * speed : 0;
-      const wz = len > 1e-9 ? (dz / len) * speed : 0;
+      let wx = len > 1e-9 ? (dx / len) * speed : 0;
+      let wz = len > 1e-9 ? (dz / len) * speed : 0;
+      // Moonwalk: walkers back away from the milk at half speed (never off the walkable cells).
+      const moon = this.moonwalkT > 0 && type.altitude <= 0 && !type.boss;
+      if (moon) { wx *= -0.5; wz *= -0.5; }
       // Ease velocity toward the wish so turns at cell corners look like turning.
       cows.vx[i] += (wx - cows.vx[i]) * turn;
       cows.vz[i] += (wz - cows.vz[i]) * turn;
       cows.x[i] = x + cows.vx[i] * dt;
       cows.z[i] = z + cows.vz[i] * dt;
+      if (moon) {
+        const c = grid.cellAt(cows.x[i], cows.z[i]);
+        if (c < 0 || !grid.walkable(c)) { cows.x[i] = x; cows.z[i] = z; cows.vx[i] = cows.vz[i] = 0; }
+      }
       if (type.blastRadius > 0 && this.towerNear(cows.x[i], cows.z[i], type.radius + BLAST_TRIGGER)) {
         this.explodeCow(i, type);
       }
@@ -801,7 +832,7 @@ export class Game {
       this.fogT += dt;
       if (this.fogT >= this.fogDur) this.fogT = this.fogDur = 0;
     }
-    this.sight = 1 - FOG_SIGHT_CUT * this.fogLevel;
+    this.sight = (1 - FOG_SIGHT_CUT * this.fogLevel) * this.sightBoost;
   }
 
   /** Bounties are worth `mult` × for `time` s (a stronger running boost isn't cut short). */
@@ -809,6 +840,47 @@ export class Game {
     if (this.bountyTime > 0 && this.bountyMult > mult) return;
     this.bountyMult = mult;
     this.bountyTime = Math.max(this.bountyTime, time);
+  }
+
+  /** Towers reload `mult` × as fast for `time` s (a stronger running overclock isn't cut short). */
+  overclock(mult, time) {
+    if (this.fireRateTime > 0 && this.fireRate > mult) return;
+    this.fireRate = mult;
+    this.fireRateTime = Math.max(this.fireRateTime, time);
+  }
+
+  /** Towers see `mult` × as far for `time` s. */
+  boostSight(mult, time) {
+    if (this.sightBoostTime > 0 && this.sightBoost > mult) return;
+    this.sightBoost = mult;
+    this.sightBoostTime = Math.max(this.sightBoostTime, time);
+  }
+
+  /** Walking cows back away from the milk for `time` s. */
+  startMoonwalk(time) { this.moonwalkT = Math.max(this.moonwalkT, time); }
+
+  /** Move cow i to (x, z) instantly (no interpolation streak) and stop it. */
+  teleportCow(i, x, z) {
+    const { cows } = this;
+    cows.x[i] = cows.prevX[i] = x;
+    cows.z[i] = cows.prevZ[i] = z;
+    cows.vx[i] = cows.vz[i] = 0;
+    cows.version++;
+  }
+
+  /**
+   * Take cow i off the field: no bounty, no milk lost, no hooks. Bosses can't
+   * be taken. Only call while iterating cows backwards (or not at all).
+   */
+  abductCow(i) {
+    const { cows } = this;
+    if (COW_TYPE_LIST[cows.type[i]].boss) return false;
+    const id = cows.id[i], x = cows.x[i], z = cows.z[i];
+    this.tracked.delete(id);
+    this.events.push({ kind: 'abduct', id, x, z });
+    this.events.push({ kind: 'splash', x, y: 2, z, radius: 1.4, color: 0x7affd0 });
+    cows.remove(i);
+    return true;
   }
 
   /** Knock every walking cow over for `time` s (cow tipping): speed 0, overriding any slow. */
@@ -881,7 +953,7 @@ export class Game {
         if (def.spinDown > 0) t.charge = Math.max(0, t.charge - def.spinDown * dt);
         continue;
       }
-      t.cooldown -= dt;
+      t.cooldown -= dt * this.fireRate;
       if (t.cooldown > 0) continue;
       const target = def.targeting(this, t);
       if (target < 0) {

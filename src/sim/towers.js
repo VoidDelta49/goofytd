@@ -16,6 +16,7 @@ import { COW_TYPE_LIST, MAX_COW_RADIUS } from './cows.js';
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
  * [minRange, range × game.sight] of the tower centre (in XZ) count (sight < 1
  * in War Moo-st fog), and a camo cow only within its `camo` metres (unless the tower `seesCamo`).
+ * A `friendly` cow (the Lost Calf) is never picked, though splash can still hit it.
  */
 export const TARGETING = {
   /** Furthest along the path: the cow with the shortest walk left to the milk. */
@@ -55,7 +56,7 @@ function pick(game, t, score) {
       for (let k = start[c], end = start[c + 1]; k < end; k++) {
         const i = slots[k];
         const type = COW_TYPE_LIST[cows.type[i]];
-        if (!def.hitsAir && type.altitude > 0) continue;
+        if (type.friendly || (!def.hitsAir && type.altitude > 0)) continue;
         const d2 = dist2(cows, i, t.x, t.z);
         if (d2 > r2 || d2 < m2) continue;
         if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close (scopes see it)
@@ -76,7 +77,7 @@ export function pickBruteForce(game, t, score) {
   let best = -1, bestScore = -Infinity;
   for (let i = 0; i < cows.count; i++) {
     const type = COW_TYPE_LIST[cows.type[i]];
-    if (!def.hitsAir && type.altitude > 0) continue;
+    if (type.friendly || (!def.hitsAir && type.altitude > 0)) continue;
     const d2 = dist2(cows, i, t.x, t.z);
     if (d2 > r2 || d2 < m2) continue;
     if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue;
