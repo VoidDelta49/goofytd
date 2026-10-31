@@ -95,7 +95,8 @@ export function openField() {
   // Cow spawners near the middle of each wall, 10 m in.
   const e = half - 10;
   const spawners = [{ x: 0, z: -e }, { x: e, z: 0 }, { x: 0, z: e }, { x: -e, z: 0 }];
-  return { blocks: b, spawn: v3(0, 0, 10), spawnYaw: 0, halfSize: half, spawners, autoWaves: true };
+  // farm: drawn as a farm (grass, fence, barn, the milk as a carton): looks only, src/client/farm.js.
+  return { blocks: b, spawn: v3(0, 0, 10), spawnYaw: 0, halfSize: half, spawners, autoWaves: true, farm: true };
 }
 
 /** Levels by URL name: `?map=playground` opens the movement playground. */

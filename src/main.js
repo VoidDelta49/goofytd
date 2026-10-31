@@ -8,6 +8,7 @@
 
 import { FixedClock } from './fixed-clock.js';
 import { DEFAULT_LEVEL, LEVELS, levelCollision } from './level.js';
+import { buildFarm, buildCarton } from './client/farm.js';
 import { PlayerController } from './player.js';
 import { defaultMoveConfig } from './sim/movement.js';
 import { Game, GAME_SPEEDS, UpgradeError, defaultGameConfig } from './sim/game.js';
@@ -70,6 +71,9 @@ function startGame({ map, seed = newSeed(), session = null }) {
   const player = new PlayerController(level.spawn, level.spawnYaw, cfg);
   const renderer = new Renderer(canvas, level);
   const td = new TdRenderer(renderer.scene, game, renderer);
+  // The farm look (field only): scenery round the field and the milk as a giant carton.
+  const farm = level.farm ? buildFarm(renderer.scene, { half: level.halfSize, spawners: level.spawners, milkX: game.milkX, milkZ: game.milkZ }) : null;
+  const carton = level.farm ? buildCarton(renderer.scene, game.milkX, game.milkZ) : null;
   const farmers = new FarmerRenderer(renderer.scene);
   const build = new BuildController(game, player, cfg);
   build.others = () => farmers.boxes();
@@ -429,6 +433,7 @@ function startGame({ map, seed = newSeed(), session = null }) {
       game.tick(simClock.dt);
       sync.endTick(game);
       td.consume(game.events); // tick() clears its events, so collect them every tick
+      if (carton && game.events.some((e) => e.kind === 'drink' && !e.gift)) carton.hit();
       sfx.consume(game.events);
       for (const e of game.events) {
         if (e.kind === 'surprise') say(e.text, 3500);
@@ -472,6 +477,8 @@ function startGame({ map, seed = newSeed(), session = null }) {
     upgrades.update(game);
     input.touch.syncGame(game, build, upgrades.isOpen);
     renderer.setView(view, player.yaw, player.pitch);
+    farm?.update(frameDt);
+    carton?.update(game.milk / game.cfg.milk, frameDt, now / 1000);
     td.update(simClock.alpha, frameDt, build); // culls against the view just set
     renderer.render();
     hud.update(now, frameDt, player, cfg, input, game, build);

@@ -3,6 +3,7 @@
 
 import * as THREE from 'three';
 import { Surface } from '../level.js';
+import { grassTexture, planksTexture } from './farm.js';
 import { viewQuaternion } from './look.js';
 
 const SKY = 0x9ec7f2;
@@ -65,8 +66,15 @@ export class Renderer {
       if (!bySurface.has(surface)) bySurface.set(surface, []);
       bySurface.get(surface).push(aabb);
     }
+    // A farm draws its floor as grass, its walls as a plank fence, and its milk as a carton (farm.js).
+    const farmLook = level.farm ? {
+      [Surface.Floor]: { color: 0xffffff, roughness: 1, map: grassTexture() },
+      [Surface.Wall]: { color: 0xffffff, roughness: 0.9, map: planksTexture() },
+    } : {};
     for (const [surface, boxes] of bySurface) {
-      const mesh = new THREE.Mesh(boxesGeometry(boxes), new THREE.MeshStandardMaterial({ ...SURFACE_STYLE[surface], map: grid }));
+      if (level.farm && surface === Surface.Milk) continue;
+      const style = farmLook[surface] ?? { ...SURFACE_STYLE[surface], map: grid };
+      const mesh = new THREE.Mesh(boxesGeometry(boxes), new THREE.MeshStandardMaterial(style));
       mesh.castShadow = surface !== Surface.Floor;
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
