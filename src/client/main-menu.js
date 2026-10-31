@@ -46,6 +46,8 @@ export class MainMenu {
     this.beacon = null;
     this.finders = [];
     this.netId = undefined; // undefined: not asked yet; null: unknown
+    // A host that closes the tab says bye, so its farm doesn't linger on other screens.
+    addEventListener('pagehide', () => { this.beacon?.stop(); this.beacon = null; });
     this.$ = (n) => root.querySelector(`[data-mm=${n}]`);
     this.nameEl = this.$('name');
     let saved = '';
@@ -158,7 +160,10 @@ export class MainMenu {
       info: () => ({ name: s.name, players: s.players.length, max: MAX_FARMERS, open: !s.started && !s.full, why: s.full ? 'the farm is full' : 'the game already started' }),
       createInvite,
       onLink: (link) => { if (this.session === s) s.addLink(link); else link.close(); },
-      onError: (e) => this.status('host', `A farmer couldn't connect (${e.message})`, 'bad'),
+      onError: (e) => {
+        if (this.relay.error) { this.status('host', e.message, 'bad'); this.$('hostManual').open = true; }
+        else this.status('host', `A farmer couldn't connect (${e.message})`, 'bad');
+      },
       onState: (st) => {
         if (st === 'open') this.status('host', 'Waiting for farmers…');
         else this.status('host', 'Can\'t reach matchmaking right now. Use an invite link below (works offline).', 'bad');
@@ -265,6 +270,11 @@ export class MainMenu {
       name: this.name,
       acceptInvite,
       onChange: () => this.renderFarms(),
+      onTrouble: (text) => {
+        this.farmsNote = text;
+        this.renderFarms();
+        this.$('joinManual').open = true;
+      },
       onState: (st) => {
         this.farmsNote = st === 'open' ? 'Looking for farms on your Wi-Fi…' : 'Can\'t reach matchmaking. Try a room code later, or an invite link (works offline).';
         this.renderFarms();
@@ -301,6 +311,7 @@ export class MainMenu {
       this.joinWith(link);
     } catch (e) {
       this.status('join', e.message, 'bad');
+      if (this.relay?.error) this.$('joinManual').open = true;
     } finally {
       this.joining = false;
     }

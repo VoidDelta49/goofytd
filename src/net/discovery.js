@@ -5,8 +5,12 @@
 //     farmers land in. Farms there show up on the join screen by themselves.
 //   - the code room: a 4-character room code the host shows (e.g. K7QM), for
 //     when the network room can't be worked out or two networks share an IP.
+// Budget: the public relay allows ~250 messages a day per public IP, shared
+// by the whole network, so nothing here repeats on a timer. A joiner seeks
+// once when its subscription opens; a host announces when it starts and
+// answers seeks. A join is then 3 messages (join, offer, answer).
 // Messages ({ v: 1, t, from, to?, ... }):
-//   joiner: seek                     who's hosting?          (repeated while looking)
+//   joiner: seek                     who's hosting?          (once per subscription)
 //   host:   host {name, players, max} here I am             (on seek, and when it starts)
 //   joiner: join {to, name}          let me in
 //   host:   offer {to, code}         invite (signal.js code; a fresh WebRTC offer per joiner)
@@ -16,14 +20,20 @@
 // Pure: the relay and the WebRTC calls are injected, so Node tests run it.
 
 export const PROTOCOL = 1;
-/** Joiners ask again this often (ms), and forget a farm not heard from for HOST_TTL. */
-export const SEEK_MS = 8000;
-export const HOST_TTL = 20000;
 /** A joiner gives up waiting for the host's invite after this long. */
-export const OFFER_TIMEOUT_MS = 10000;
+export const OFFER_TIMEOUT_MS = 15000;
+/** A host answers seeks in one room at most this often (ms). */
+const REPLY_GAP_MS = 2000;
 /** Invites a host keeps open at once (a spammy room can't make it build hundreds). */
 export const MAX_PENDING = 3;
-const PENDING_TTL_MS = 30000;
+const PENDING_TTL_MS = 45000;
+
+/** Why the relay refused to carry a message, in farmer words. */
+export function relayTrouble(relay) {
+  return relay?.error === 'limit'
+    ? 'The free matchmaking server has hit its daily limit for your network (it resets within a day). Use an invite link instead.'
+    : 'Can\'t reach matchmaking. Check your connection, or use an invite link.';
+}
 /** Room code alphabet: no 0/O, 1/I/L, so it reads out loud and types cleanly. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 4;
@@ -81,18 +91,19 @@ export class HostBeacon {
     });
   }
 
-  announce(topic) {
+  async announce(topic) {
     const i = this.o.info();
     if (!i.open) return;
     this.lastReply.set(topic, Date.now());
-    this.o.relay.send(topic, { v: PROTOCOL, t: 'host', from: this.id, name: i.name, players: i.players, max: i.max });
+    const ok = await this.o.relay.send(topic, { v: PROTOCOL, t: 'host', from: this.id, name: i.name, players: i.players, max: i.max });
+    if (!ok) this.o.onError?.(new Error(relayTrouble(this.o.relay)));
   }
 
   async onMessage(topic, m) {
     if (!valid(m) || m.from === this.id) return;
     if (m.t === 'seek') {
       // Several joiners seeking at once get one reply between them.
-      if (Date.now() - (this.lastReply.get(topic) ?? 0) > 1000) this.announce(topic);
+      if (Date.now() - (this.lastReply.get(topic) ?? 0) > REPLY_GAP_MS) this.announce(topic);
       return;
     }
     if (m.to !== this.id) return;
@@ -114,7 +125,10 @@ export class HostBeacon {
       }
       if (this.pending.get(m.from) !== slot) { slot.inv.cancel(); return; } // stopped meanwhile
       slot.timer = setTimeout(() => this.drop(m.from), PENDING_TTL_MS);
-      this.o.relay.send(topic, { v: PROTOCOL, t: 'offer', from: this.id, to: m.from, code: slot.inv.code });
+      if (!await this.o.relay.send(topic, { v: PROTOCOL, t: 'offer', from: this.id, to: m.from, code: slot.inv.code })) {
+        if (this.pending.get(m.from) === slot) this.drop(m.from);
+        this.o.onError?.(new Error(relayTrouble(this.o.relay)));
+      }
     } else if (m.t === 'answer' && typeof m.code === 'string') {
       const slot = this.pending.get(m.from);
       if (!slot?.inv) return;
@@ -148,7 +162,8 @@ export class HostBeacon {
 
 /**
  * Joiner side: lists farms in its rooms and connects to one.
- * opts: relay, topics, name, acceptInvite(code) -> { code, link }, onChange(), onState(state)
+ * opts: relay, topics, name, acceptInvite(code) -> { code, link }, onChange(), onState(state),
+ *       onTrouble(text) (the relay refused a seek), offerTimeoutMs?
  */
 export class Finder {
   constructor(opts) {
@@ -158,7 +173,6 @@ export class Finder {
     this.hosts = new Map();
     this.waiting = null; // { host, resolve, reject, timer }
     this.sub = null;
-    this.timer = 0;
   }
 
   start() {
@@ -167,17 +181,18 @@ export class Finder {
       this.o.onState?.(s);
       if (s === 'open') this.seek();
     });
-    this.timer = setInterval(() => { this.prune(); this.seek(); }, SEEK_MS);
   }
 
-  seek() {
-    for (const t of this.o.topics) this.o.relay.send(t, { v: PROTOCOL, t: 'seek', from: this.id });
+  /** Ask who's hosting. Once per (re)opened subscription: hosts that start later announce themselves. */
+  async seek() {
+    let ok = true;
+    for (const t of this.o.topics) ok = await this.o.relay.send(t, { v: PROTOCOL, t: 'seek', from: this.id }) && ok;
+    if (!ok) this.o.onTrouble?.(relayTrouble(this.o.relay));
   }
 
-  prune(now = Date.now()) {
-    let changed = false;
-    for (const [id, h] of this.hosts) if (now - h.seen > HOST_TTL) { this.hosts.delete(id); changed = true; }
-    if (changed) this.o.onChange?.();
+  /** Forget a farm (it didn't answer: closed without saying bye). */
+  forget(id) {
+    if (this.hosts.delete(id)) this.o.onChange?.();
   }
 
   onMessage(topic, m) {
@@ -215,17 +230,26 @@ export class Finder {
     const offer = new Promise((resolve, reject) => {
       this.waiting = {
         host: hostId, resolve, reject,
-        timer: setTimeout(() => { this.waiting = null; reject(new Error('The host didn\'t answer. Try again.')); }, OFFER_TIMEOUT_MS),
+        timer: setTimeout(() => {
+          this.waiting = null;
+          this.forget(hostId);
+          reject(new Error('That farm didn\'t answer. It may have closed: ask the host to open it again.'));
+        }, this.o.offerTimeoutMs ?? OFFER_TIMEOUT_MS),
       };
     });
-    this.o.relay.send(h.topic, { v: PROTOCOL, t: 'join', from: this.id, to: hostId, name: this.o.name });
+    if (!await this.o.relay.send(h.topic, { v: PROTOCOL, t: 'join', from: this.id, to: hostId, name: this.o.name })) {
+      if (this.waiting?.host === hostId) { clearTimeout(this.waiting.timer); this.waiting = null; }
+      throw new Error(relayTrouble(this.o.relay));
+    }
     const r = await this.o.acceptInvite(await offer);
-    this.o.relay.send(h.topic, { v: PROTOCOL, t: 'answer', from: this.id, to: hostId, code: r.code });
+    if (!await this.o.relay.send(h.topic, { v: PROTOCOL, t: 'answer', from: this.id, to: hostId, code: r.code })) {
+      r.link.close?.();
+      throw new Error(relayTrouble(this.o.relay));
+    }
     return r.link;
   }
 
   stop() {
-    clearInterval(this.timer);
     if (this.waiting) { clearTimeout(this.waiting.timer); this.waiting = null; }
     this.sub?.close();
     this.sub = null;

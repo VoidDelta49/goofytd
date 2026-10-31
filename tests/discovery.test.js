@@ -3,7 +3,7 @@
 // in-memory relay and fake WebRTC calls; peer.js / relay.js network I/O is
 // covered by the headless-browser run.
 import { test, assert } from './harness.js';
-import { Finder, HostBeacon, HOST_TTL, MAX_PENDING, CODE_ALPHABET, newRoomCode, normalizeCode, roomTopic } from '../src/net/discovery.js';
+import { Finder, HostBeacon, MAX_PENDING, CODE_ALPHABET, newRoomCode, normalizeCode, roomTopic } from '../src/net/discovery.js';
 import { networkIdFromCandidate } from '../src/net/peer.js';
 import { relayFromParams, NtfyRelay } from '../src/net/relay.js';
 
@@ -11,7 +11,7 @@ const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 
 /** Pub/sub in memory with the relay interface. Delivery is async, like a real one. */
 class MemoryRelay {
-  constructor() { this.subs = new Set(); this.sent = []; }
+  constructor() { this.subs = new Set(); this.sent = []; this.refuse = false; this.error = null; }
   listen(topics, onMessage, onState = () => {}) {
     const sub = { topics: new Set(topics), onMessage };
     this.subs.add(sub);
@@ -19,6 +19,8 @@ class MemoryRelay {
     return { close: () => this.subs.delete(sub) };
   }
   async send(topic, obj) {
+    if (this.refuse) { this.error = 'limit'; return false; }
+    this.error = null;
     const m = JSON.stringify(obj);
     this.sent.push({ topic, obj });
     setTimeout(() => { for (const s of [...this.subs]) if (s.topics.has(topic)) s.onMessage(topic, JSON.parse(m)); }, 1);
@@ -58,8 +60,8 @@ function host(relay, topics, info = {}) {
   return { b, links, st };
 }
 
-function finder(relay, topics, name = 'Joe') {
-  const f = new Finder({ relay, topics, name, acceptInvite: fakeAcceptInvite });
+function finder(relay, topics, name = 'Joe', extra = {}) {
+  const f = new Finder({ relay, topics, name, acceptInvite: fakeAcceptInvite, ...extra });
   f.start();
   return f;
 }
@@ -146,7 +148,7 @@ test('discovery: a full or started farm says no, and a host never holds more tha
   assert(h.b.pending.size === 0, 'stop left invites open');
 });
 
-test('discovery: junk on the relay is ignored and stale farms expire', async () => {
+test('discovery: junk on the relay is ignored', async () => {
   const relay = new MemoryRelay();
   const room = await roomTopic('net', 'x');
   const f = finder(relay, [room]);
@@ -157,8 +159,56 @@ test('discovery: junk on the relay is ignored and stale farms expire', async () 
   await tick(20);
   assert(f.hosts.size === 1, `hosts ${f.hosts.size}`);
   assert(!/[<>]/.test(f.hosts.get('abc').name), 'markup in a farm name');
-  f.prune(Date.now() + HOST_TTL + 1);
-  assert(f.hosts.size === 0, 'stale farm kept');
+  f.stop();
+});
+
+test('discovery: an idle lobby sends nothing (the public relay allows ~250 messages a day per network)', async () => {
+  const relay = new MemoryRelay();
+  const room = await roomTopic('net', '203.0.113.9');
+  const h = host(relay, [room]);
+  const f = finder(relay, [room]);
+  await tick(30);
+  const settled = relay.sent.length;
+  assert(settled <= 3, `startup used ${settled} messages`); // announce, seek, reply
+  await tick(120);
+  assert(relay.sent.length === settled, `idle traffic: ${relay.sent.length - settled} messages`);
+  await f.connect([...f.hosts.keys()][0]);
+  await tick(20);
+  assert(relay.sent.length - settled === 3, `a join took ${relay.sent.length - settled} messages`);
+  f.stop(); h.b.stop();
+});
+
+test('discovery: a relay that refuses messages says so instead of "the host didn\'t answer"', async () => {
+  const relay = new MemoryRelay();
+  const room = await roomTopic('net', '203.0.113.10');
+  const h = host(relay, [room]);
+  let trouble = null;
+  const f = finder(relay, [room], 'Joe', { onTrouble: (t) => { trouble = t; } });
+  await tick(20);
+  relay.refuse = true;
+  let err = null;
+  const t0 = Date.now();
+  await f.connect([...f.hosts.keys()][0]).catch((e) => { err = e; });
+  assert(err && /daily limit/.test(err.message), `got ${err?.message}`);
+  assert(Date.now() - t0 < 100, 'waited for a timeout instead of failing fast');
+  assert(f.waiting === null, 'still waiting after a failed join');
+  f.seek();
+  await tick(5);
+  assert(trouble && /daily limit/.test(trouble), `seek trouble: ${trouble}`);
+  f.stop(); h.b.stop();
+});
+
+test('discovery: a farm that vanished without a bye is dropped after it fails to answer', async () => {
+  const relay = new MemoryRelay();
+  const room = await roomTopic('net', '203.0.113.11');
+  const f = finder(relay, [room], 'Joe', { offerTimeoutMs: 30 });
+  relay.send(room, { v: 1, t: 'host', from: 'ghost', name: 'Gone', players: 1, max: 4 });
+  await tick(10);
+  assert(f.hosts.has('ghost'), 'ghost not listed');
+  let err = null;
+  await f.connect('ghost').catch((e) => { err = e; });
+  assert(err && /didn't answer/.test(err.message), `got ${err?.message}`);
+  assert(!f.hosts.has('ghost'), 'ghost farm kept');
   f.stop();
 });
 
