@@ -6,7 +6,7 @@
 import { test, assert, assertClose } from './harness.js';
 import { levelCollision, openField } from '../src/level.js';
 import { Game, UpgradeError, defaultGameConfig } from '../src/sim/game.js';
-import { TOWER_TYPES, TOWER_FORMS, SELL_REFUND, towerStats } from '../src/sim/towers.js';
+import { TOWER_TYPES, TOWER_FORMS, SELL_REFUND, towerStats, maxLevel } from '../src/sim/towers.js';
 import { COW_TYPES } from '../src/sim/cows.js';
 import { upgradeModel, statDeltas } from '../src/client/upgrade-menu.js';
 
@@ -45,28 +45,31 @@ function buildForm(g, formId, x, z) {
   return t;
 }
 
-test('upgrades: every tower has buffs, then a choice of two variants, each with one or more buff levels', () => {
-  for (const root of Object.values(TOWER_TYPES)) {
-    let f = root, buffs = 0;
+test('upgrades: every tree: Lv1-3 buffs, two variants at Lv4, buffs to Lv6, two more forks at Lv7, buffs to Lv10', () => {
+  /** Walk single buffs from f; returns the last form (where a choice or the end is). */
+  const buffsFrom = (f) => {
     while (f.upgrades.length === 1) {
       f = TOWER_FORMS[f.upgrades[0]];
       assert(f.kind === 'buff', `${f.id}: a single upgrade should be a buff`);
-      buffs++;
     }
-    assert(buffs >= 1, `${root.id}: no buff levels`);
-    assert(f.upgrades.length === 2, `${root.id}: expected a two-way variant choice after ${f.id}`);
-    for (const vid of f.upgrades) {
+    return f;
+  };
+  for (const root of Object.values(TOWER_TYPES)) {
+    const fork1 = buffsFrom(root);
+    assert(fork1.level === 3 && fork1.upgrades.length === 2, `${root.id}: expected a two-way choice at Lv3 (${fork1.id})`);
+    for (const vid of fork1.upgrades) {
       const v = TOWER_FORMS[vid];
-      assert(v.kind === 'variant' && v.root === root.id, `${vid}: should be a variant of ${root.id}`);
-      // A straight line of buffs to the end: no second choice down a path.
-      let n = 0;
-      for (let f2 = v; f2.upgrades.length; n++) {
-        assert(f2.upgrades.length === 1, `${f2.id}: only one choice per tower`);
-        f2 = TOWER_FORMS[f2.upgrades[0]];
-        assert(f2.kind === 'buff', `${f2.id}: levels after a variant should be buffs`);
+      assert(v.kind === 'variant' && v.root === root.id && v.level === 4, `${vid}: should be a Lv4 variant of ${root.id}`);
+      const fork2 = buffsFrom(v);
+      assert(fork2.level === 6 && fork2.upgrades.length === 2, `${vid}: expected a second two-way choice at Lv6 (${fork2.id})`);
+      for (const sid of fork2.upgrades) {
+        const sv = TOWER_FORMS[sid];
+        assert(sv.kind === 'variant' && sv.level === 7, `${sid}: should be a Lv7 variant`);
+        const end = buffsFrom(sv);
+        assert(end.upgrades.length === 0 && end.level === 10, `${sid}: should run straight to Lv10 (${end.id} is Lv${end.level})`);
       }
-      assert(n >= 1, `${vid}: should have at least one more level`);
     }
+    assert(maxLevel(root.id) === 10, `${root.id}: max level ${maxLevel(root.id)}`);
   }
   for (const f of Object.values(TOWER_FORMS)) {
     const root = TOWER_TYPES[f.root];
@@ -300,7 +303,7 @@ test('upgrades: panel model lists the next upgrades with what they change', () =
   const t = g.placeTower('squirter', 21, 21);
   let m = upgradeModel(t, g.money);
   assert(m.level === 1 && m.options.length === 1 && !m.choice && !m.maxed, 'base model');
-  assert(m.maxLevel === 5 && m.path.length === 1, `pips ${m.maxLevel}`);
+  assert(m.maxLevel === 10 && m.path.length === 1, `pips ${m.maxLevel}`);
   const o = m.options[0];
   assert(o.id === 'squirter2' && o.kind === 'buff' && o.afford === g.money >= o.cost, 'option');
   const dps = o.deltas.find((d) => d.label === 'dps');
@@ -314,10 +317,12 @@ test('upgrades: panel model lists the next upgrades with what they change', () =
   // An honest trade-off: the shotgun gives up range.
   const range = statDeltas(TOWER_FORMS.squirter3, TOWER_FORMS.shotgun).find((d) => d.label === 'range');
   assert(range && !range.better, 'shotgun range loss not shown as worse');
-  g.upgradeTower(t.id, 'gatling');
-  g.upgradeTower(t.id, 'gatling2');
+  for (const id of ['gatling', 'gatling2', 'gatling3']) g.upgradeTower(t.id, id);
   m = upgradeModel(t, g.money);
-  assert(m.maxed && m.level === 5 && m.path.map((p) => p.kind).join() === 'base,buff,buff,variant,buff', 'maxed model');
+  assert(m.choice && m.options.map((x) => x.id).join() === 'chocogat,strawgat', 'second path choice');
+  for (const id of ['chocogat', 'chocogat2', 'chocogat3', 'chocogat4']) assert(g.upgradeTower(t.id, id).ok, id);
+  m = upgradeModel(t, g.money);
+  assert(m.maxed && m.level === 10 && m.path.map((p) => p.kind).join() === 'base,buff,buff,variant,buff,buff,variant,buff,buff,buff', 'maxed model');
   assert(m.refund === Math.floor(t.spent * SELL_REFUND), 'refund');
 });
 

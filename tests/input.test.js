@@ -241,7 +241,7 @@ test('touch buttons: UPGRADE names the next level, a path choice, or MAXED', () 
   const next = TOWER_FORMS[TOWER_FORMS.squirter.upgrades[0]];
   assert(at('squirter').sub === `LV 2 · ${next.upgradeCost}` && !at('squirter').dim, `buff text: ${at('squirter').sub}`);
   assert(at('squirter3').sub === 'pick a path!', 'variant choice');
-  assert(at('gatling2').sub === 'MAXED' && at('gatling2').dim, 'maxed');
+  assert(at('chocogat4').sub === 'MAXED' && at('chocogat4').dim, 'maxed');
   const open = touchButtonState(game, { selected: null, lookTower: null, preview: null }, true).upgrade;
   assert(open.on && open.sub === 'close', 'open panel: the button closes it');
 });
@@ -266,7 +266,7 @@ test('touch ACTION button: build a picked tower, upgrade the one you look at, cl
   // Aiming a buildable ghost wins over a tower in view; a blocked ghost on a tower means that tower.
   assert(at({ selected: id, preview: { ok: true }, lookTower: look }).mode === 'build', 'buildable ghost wins');
   assert(at({ selected: id, preview: { ok: false }, lookTower: look }).mode === 'upgrade', 'blocked ghost on a tower: upgrade it');
-  const maxed = at({ lookTower: { spent: 0, def: TOWER_FORMS.gatling2 } });
+  const maxed = at({ lookTower: { spent: 0, def: TOWER_FORMS.chocogat4 } });
   assert(maxed.mode === 'upgrade' && !maxed.dim && maxed.sub === 'maxed · sell', 'maxed tower still opens the sheet to sell');
   assert(at({ lookTower: look }, true).mode === 'close', 'open sheet: closes it');
 });

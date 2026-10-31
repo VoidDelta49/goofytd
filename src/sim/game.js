@@ -263,6 +263,7 @@ export class Game {
     for (const t of this.towers.values()) {
       const d = t.def;
       if (d.interest > 0) paid += Math.min(d.interestCap, Math.floor(base * d.interest));
+      if (d.income > 0) paid += d.income; // Milk Money Printer: a flat payout, saved up or not
     }
     this.money += paid;
     this.lastInterest = paid;
@@ -1001,6 +1002,9 @@ export class Game {
   }
 
   updateTowers(dt) {
+    // Scarecrows: towers in a booster's reach fire faster (the best booster counts, they don't stack).
+    let boosters = null;
+    for (const t of this.towers.values()) if (t.def.boost) (boosters ??= []).push(t);
     for (const t of this.towers.values()) {
       const def = t.def;
       // Dents patch themselves up once the headbutting stops.
@@ -1013,7 +1017,16 @@ export class Game {
         if (def.spinDown > 0) t.charge = Math.max(0, t.charge - def.spinDown * dt);
         continue;
       }
-      t.cooldown -= dt * this.fireRate;
+      let boost = 1;
+      if (boosters) {
+        for (const b of boosters) {
+          if (b === t) continue;
+          const dx = b.x - t.x, dz = b.z - t.z, r = b.def.boost.range;
+          if (dx * dx + dz * dz <= r * r) boost = Math.max(boost, 1 + b.def.boost.rate);
+        }
+      }
+      t.boost = boost;
+      t.cooldown -= dt * this.fireRate * boost;
       if (t.cooldown > 0) continue;
       const target = def.targeting(this, t);
       if (target < 0) {
@@ -1022,6 +1035,9 @@ export class Game {
         continue;
       }
       this.aimAt(t, this.cows.x[target], this.cows.z[target]);
+      // Every stunEvery-th volley curdles what it hits (attacks read t.stunning).
+      t.volley++;
+      t.stunning = def.stunEvery > 0 && t.volley % def.stunEvery === 0;
       def.attack(this, t, target);
       if (def.minInterval > 0) {
         // Spin-up gun: the gap shrinks from interval to minInterval as it charges.
@@ -1054,6 +1070,8 @@ export class Game {
       p.prevT = p.t;
       p.t += dt;
       if (p.t < p.T) continue;
+      // Statuses first (they never remove a cow), then the damage.
+      if (p.fx) this.splashStatus(p.x1, p.z1, p.radius, p.fx, p.tower, p.air);
       this.splash(p.x1, p.z1, p.radius, p.damage, this.towers.get(p.tower), p.air);
       this.events.push({ kind: 'splash', x: p.x1, y: p.y1, z: p.z1, radius: p.radius, color: p.color, air: p.air });
       if (p.slick) {
@@ -1106,6 +1124,27 @@ export class Game {
     }
   }
 
+  /** Stun cow i (stopped dead) for `time` s; slow resistance (bosses) still applies. */
+  stunCow(i, time) { this.slowCow(i, 0, time); }
+
+  /**
+   * A shell's statuses on every cow it splashes: fx { burn, chill, mark, stun }
+   * (stun: seconds, or 0). Never removes a cow, so it runs before the damage.
+   */
+  splashStatus(x, z, radius, fx, towerId, air) {
+    const { cows } = this;
+    for (const i of this.cowHash.near(cows, x, z, radius + MAX_COW_RADIUS())) {
+      const type = COW_TYPE_LIST[cows.type[i]];
+      if ((type.altitude > 0) !== air) continue;
+      const dx = cows.x[i] - x, dz = cows.z[i] - z, r = radius + type.radius;
+      if (dx * dx + dz * dz > r * r) continue;
+      if (fx.burn) this.igniteCow(i, fx.burn.dps, fx.burn.time, fx.burn.spread ?? 0, towerId);
+      if (fx.chill) { this.chillCow(i, fx.chill.vuln, fx.chill.time); this.slowCow(i, fx.chill.slow, fx.chill.time); }
+      if (fx.mark) this.chillCow(i, fx.mark.vuln, fx.mark.time);
+      if (fx.stun > 0) this.stunCow(i, fx.stun);
+    }
+  }
+
   /** Damage every cow within `radius` of (x, z): flyers for an airburst (`air`), otherwise walkers. */
   splash(x, z, radius, damage, tower, air = false) {
     const { cows } = this;
@@ -1137,7 +1176,8 @@ export class Game {
     const x = cows.x[i], z = cows.z[i];
     // An Auction Barn nearby sells the cow for more (the best barn in reach; whole moolah only).
     const mult = this.bankMult(x, z);
-    this.earn(type.bounty * this.bountyMult * mult);
+    // Bounty Hunters cash in their own kills (burns they lit count too).
+    this.earn(type.bounty * this.bountyMult * mult * (tower?.def?.ownBounty ?? 1));
     this.kills++;
     if (tower) tower.kills++;
     this.events.push({ kind: 'kill', x, z, id: cows.id[i], mult });
@@ -1291,7 +1331,7 @@ export class Game {
     const id = this.nextTowerId++;
     const t = {
       id, def: p.type, x: p.x, z: p.z, cx: p.cx, cz: p.cz, cells: p.cells, aabb: p.aabb,
-      cooldown: 0, charge: 0, kills: 0, shots: 0, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
+      cooldown: 0, charge: 0, kills: 0, shots: 0, volley: 0, stunning: false, boost: 1, aimX: 0, aimZ: -1, muzzleX: 0, muzzleY: 0, muzzleZ: 0,
       spent: p.type.cost,
       hp: towerMaxHp(p.type), maxHp: towerMaxHp(p.type), lastHit: -Infinity, stunT: 0,
     };

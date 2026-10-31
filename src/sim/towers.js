@@ -107,11 +107,72 @@ function hitAll(game, t, slots, damage) {
   for (const k of slots) game.damageCow(k, damage, t);
 }
 
+/**
+ * Statuses a direct hit (or an aura pulse) puts on cow k, before its damage:
+ * `burn` / `chill` (also read by 'spray', which applies its own), `mark`
+ * { vuln, time } (× vuln damage taken, no slow), and a stun of `stunTime` s
+ * on every stunEvery-th volley (t.stunning). Never removes a cow.
+ */
+function applyHit(game, t, k) {
+  const d = t.def;
+  if (d.burn) game.igniteCow(k, d.burn.dps, d.burn.time, d.burn.spread ?? 0, t.id);
+  if (d.chill) { game.chillCow(k, d.chill.vuln, d.chill.time); game.slowCow(k, d.chill.slow, d.chill.time); }
+  if (d.mark) game.chillCow(k, d.mark.vuln, d.mark.time);
+  if (t.stunning) game.stunCow(k, d.stunTime);
+}
+
+/**
+ * Chain hit (Chocolate Thunder, Lightning Rod): the shot hits the target, then
+ * jumps up to `chain.jumps` times to the nearest cow within `chain.range` of
+ * the last one it hit that it hasn't hit yet, each jump doing × `falloff` of
+ * the one before. Targets are all picked first, then hit highest slot first.
+ */
+const chainDmg = [];
+function chainHit(game, t, i) {
+  const { cows } = game;
+  const def = t.def, c = def.chain, r2 = c.range * c.range;
+  hitScratch.length = 0;
+  hitScratch.push(i);
+  game.events.push(shotEvent(game, t, i));
+  let last = i;
+  for (let j = 0; j < c.jumps; j++) {
+    const lx = cows.x[last], lz = cows.z[last];
+    let best = -1, bestD = Infinity;
+    for (const k of game.cowHash.near(cows, lx, lz, c.range, false)) {
+      if (hitScratch.includes(k)) continue;
+      const type = COW_TYPE_LIST[cows.type[k]];
+      if (type.friendly || (!def.hitsAir && type.altitude > 0)) continue;
+      const d2 = dist2(cows, k, lx, lz);
+      if (d2 <= r2 && d2 < bestD) { bestD = d2; best = k; } // ascending slots: ties keep the lower one
+    }
+    if (best < 0) break;
+    game.events.push({
+      kind: 'shot', tower: t.id, x0: lx, y0: cowAimY(COW_TYPE_LIST[cows.type[last]]), z0: lz,
+      x1: cows.x[best], y1: cowAimY(COW_TYPE_LIST[cows.type[best]]), z1: cows.z[best],
+      color: def.shotColor, sound: def.shotSound, quiet: true, chain: true,
+    });
+    hitScratch.push(best);
+    last = best;
+  }
+  chainDmg.length = 0;
+  let d = def.damage;
+  for (let n = 0; n < hitScratch.length; n++) { chainDmg.push([hitScratch[n], d]); d *= c.falloff; }
+  chainDmg.sort((a, b) => b[0] - a[0]);
+  for (const [k] of chainDmg) applyHit(game, t, k);
+  for (const [k, dmg] of chainDmg) game.damageCow(k, dmg, t);
+}
+
+/** Eight fixed directions for cluster bomblets (no trig: lockstep co-op needs bit-identical sims). */
+const DIRS8 = [[1, 0], [0.7071067811865476, 0.7071067811865476], [0, 1], [-0.7071067811865476, 0.7071067811865476],
+  [-1, 0], [-0.7071067811865476, -0.7071067811865476], [0, -1], [0.7071067811865476, -0.7071067811865476]];
+
 /** Attacks: (game, tower, cowSlot) -> void. Called once per shot. */
 export const ATTACKS = {
   /** Instant hit on the target. Emits a 'shot' event for the tracer. */
   hitscan(game, t, i) {
+    if (t.def.chain) { chainHit(game, t, i); return; }
     game.events.push(shotEvent(game, t, i));
+    applyHit(game, t, i);
     game.damageCow(i, t.def.damage, t);
   },
 
@@ -129,12 +190,26 @@ export const ATTACKS = {
     const T = def.flightTime;
     const type = COW_TYPE_LIST[cows.type[i]];
     const air = type.altitude > 0;
-    game.projectiles.push({
+    const fx = def.burn || def.chill || def.mark || t.stunning
+      ? { burn: def.burn, chill: def.chill, mark: def.mark, stun: t.stunning ? def.stunTime : 0 } : null;
+    const shell = {
       tower: t.id, x0: t.muzzleX, y0: t.muzzleY, z0: t.muzzleZ,
       x1: cows.x[i] + cows.vx[i] * T, z1: cows.z[i] + cows.vz[i] * T, y1: air ? cowAimY(type) : 0.3, air,
       arc: def.arcHeight, t: 0, prevT: 0, T,
-      damage: air ? def.damage : def.damage * def.groundFactor, radius: def.splashRadius, color: def.shotColor, slick: air ? null : def.slick,
-    });
+      damage: air ? def.damage : def.damage * def.groundFactor, radius: def.splashRadius, color: def.shotColor, slick: air ? null : def.slick, fx,
+    };
+    game.projectiles.push(shell);
+    // Cluster shells: bomblets ring the landing point, the ring turning a notch each volley.
+    const c = def.cluster;
+    if (c) {
+      for (let n = 0; n < c.count; n++) {
+        const [dx, dz] = DIRS8[(Math.floor(n * 8 / c.count) + t.volley) % 8];
+        game.projectiles.push({
+          ...shell, x1: shell.x1 + dx * c.spread, z1: shell.z1 + dz * c.spread, T: T * (1.08 + 0.06 * (n % 3)),
+          damage: shell.damage * c.damage, radius: shell.radius * c.radius, slick: null,
+        });
+      }
+    }
     game.events.push({ kind: 'launch', tower: t.id, x: t.muzzleX, z: t.muzzleZ });
   },
 
@@ -163,6 +238,7 @@ export const ATTACKS = {
     }
     // One loud bang, a tracer per pellet.
     hitScratch.forEach((k, n) => game.events.push(shotEvent(game, t, k, n ? { quiet: true } : null)));
+    for (const k of hitScratch) applyHit(game, t, k);
     hitAll(game, t, hitScratch, def.damage);
   },
 
@@ -181,6 +257,7 @@ export const ATTACKS = {
       const r = def.range + type.radius;
       if (dist2(cows, k, t.x, t.z) > r * r) continue;
       if (def.slow < 1) game.slowCow(k, def.slow, def.slowTime);
+      applyHit(game, t, k);
       if (def.damage > 0 && hitScratch.length < def.maxHits) hitScratch.push(k);
     }
     if (!hitScratch.length) return;
@@ -219,12 +296,15 @@ export const ATTACKS = {
       kind: 'spray', tower: t.id, x0: t.muzzleX, y0: t.muzzleY, z0: t.muzzleZ, dx: fx, dz: fz,
       range, spreadCos: def.spreadCos, color: def.shotColor, sound: def.shotSound, hits: hitScratch.length,
     });
+    // Lava Latte: every slickEvery-th squirt leaves a burning puddle under the target.
+    if (def.slick && def.slickEvery > 0 && t.volley % def.slickEvery === 0) {
+      const s = def.slick;
+      game.zones.push({ x: cows.x[i], z: cows.z[i], radius: s.radius, t: 0, T: s.time, dps: s.dps, slow: s.slow, tower: t.id, color: def.shotColor });
+    }
     hitScratch.sort((a, b) => b - a);
-    const { burn, chill } = def;
     for (const k of hitScratch) {
       // Status first, so the hit that lands already counts the freeze.
-      if (burn) game.igniteCow(k, burn.dps, burn.time, burn.spread ?? 0, t.id);
-      if (chill) { game.chillCow(k, chill.vuln, chill.time); game.slowCow(k, chill.slow, chill.time); }
+      applyHit(game, t, k);
       game.damageCow(k, def.damage, t, false);
     }
   },
@@ -240,6 +320,7 @@ export const ATTACKS = {
     const crit = def.critEvery > 0 && t.shots % def.critEvery === 0;
     const type = COW_TYPE_LIST[cows.type[i]];
     game.events.push(shotEvent(game, t, i, crit ? { crit: true } : null));
+    applyHit(game, t, i);
     if (game.damageCow(i, def.damage * (crit ? def.critMult : 1), t)) return;
     if (def.execute > 0 && type.hp <= EXECUTE_MAX_HP && cows.hp[i] < def.execute * cows.maxHp[i]) {
       game.events.push({ kind: 'execute', x: cows.x[i], z: cows.z[i] });
@@ -275,6 +356,7 @@ export const ATTACKS = {
     const ex = t.x + fx * range, ez = t.z + fz * range;
     game.events.push({ ...shotEvent(game, t, i), x1: ex, y1: 1.0, z1: ez, beam: true });
     hitScratch.sort((a, b) => b - a);
+    for (const k of hitScratch) applyHit(game, t, k);
     for (const k of hitScratch) game.damageCow(k, def.damage, t, true, true);
   },
 };
@@ -332,6 +414,15 @@ function resolve(def) {
  *   beamWidth             'pierce': metres either side of the line the slug hits
  *   bountyMult            no attack: cows killed within `range` pay × this (best barn wins)
  *   interest, interestCap no attack: pays interest × banked moolah (≤ cap) as each wave starts
+ *   chain                 'hitscan': { jumps, range, falloff } the shot jumps on to nearby cows
+ *   mark                  { vuln, time }: hit cows take × vuln damage from everything (no slow)
+ *   burn, chill           also work on any attack's hits (and shells, auras), not just 'spray'
+ *   stunEvery, stunTime   every n-th volley stops what it hits dead for stunTime s
+ *   cluster               'lob': { count, spread, damage, radius } bomblets ringing the landing point
+ *   slickEvery            'spray': every n-th squirt leaves its `slick` under the target
+ *   income                no attack: flat moolah paid as each wave starts
+ *   boost                 { range, rate }: towers in range fire × (1 + rate) faster (best one counts)
+ *   ownBounty             kills by this tower pay × this
  *   accent                UI colour for its upgrade card
  *   ...plus whatever its attack reads (flightTime, splashRadius, arcHeight, shotColor)
  */
@@ -344,6 +435,7 @@ export function defineTower(def) {
     blastProof: false, groundFactor: 1, accent: 0xffd84d, shotSound: 'shot', hp: 60,
     burn: null, chill: null, seesCamo: false, critEvery: 0, critMult: 1, execute: 0, beamWidth: 0,
     bountyMult: 1, interest: 0, interestCap: 0,
+    chain: null, mark: null, stunEvery: 0, stunTime: 0, cluster: null, slickEvery: 0, income: 0, boost: null, ownBounty: 1,
     ...def, ...fns,
     level: 1, root: def.id, from: null, kind: 'base', upgradeCost: 0, upgrades: [],
   });
@@ -460,6 +552,24 @@ export function towerStats(def) {
       add('slow', 'puddle slows', 1 - def.slick.slow, `${Math.round((1 - def.slick.slow) * 100)}%`);
     }
   }
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  if (def.attack && def.bountyMult > 1) { add('moolah', 'kills pay', def.bountyMult, `×${def.bountyMult}`); }
+  if (def.chain) add('chain', 'chains to', def.chain.jumps, `${def.chain.jumps} more cows · ${pct(def.chain.falloff)} each`);
+  if (def.mark) add('mark', 'marked cows take', def.mark.vuln, `+${pct(def.mark.vuln - 1)} dmg · ${def.mark.time} s`);
+  if (def.stunEvery > 0) add('stun', 'stuns', def.stunTime / def.stunEvery, `${def.stunTime} s every ${def.stunEvery === 1 ? 'shot' : `${def.stunEvery} shots`}`);
+  if (def.cluster) add('cluster', 'bomblets', def.cluster.count);
+  if (def.attackName !== 'spray' && def.burn) {
+    add('burn', 'burn', def.burn.dps, `${def.burn.dps}/s · ${def.burn.time} s`);
+    if (def.burn.spread > 0) add('spread', 'flambé spread', def.burn.spread, `${fmt(def.burn.spread)} m`);
+  }
+  if (def.attackName !== 'spray' && def.chill) {
+    add('chill', 'chill slows', 1 - def.chill.slow, pct(1 - def.chill.slow));
+    add('vuln', 'frozen cows take', def.chill.vuln, `+${pct(def.chill.vuln - 1)} dmg`);
+  }
+  if (def.slickEvery > 0 && def.slick) add('lava', 'lava puddle', def.slick.dps, `${def.slick.dps}/s every ${def.slickEvery} squirts`);
+  if (def.income > 0) add('income', 'income/wave', def.income);
+  if (def.boost) add('boost', 'speeds towers', def.boost.rate, `+${pct(def.boost.rate)} in ${fmt(def.boost.range)} m`);
+  if (def.ownBounty > 1) add('bounty', 'own kills pay', def.ownBounty, `×${def.ownBounty}`);
   if (def.seesCamo) add('camo', 'spots Ninjas', 1, 'yes');
   if (def.attack) add('air', 'hits flyers', def.hitsAir ? 1 : 0, def.hitsAir ? 'yes' : 'no');
   if (def.blastProof) add('blast', 'Kaboom-proof', 1, 'yes');
@@ -701,6 +811,13 @@ defineUpgrade({
   parts: BALE(0x5a5f6a),
 });
 
+defineUpgrade({
+  id: 'haybale3', from: 'haybale2', kind: 'buff', cost: 30,
+  name: 'Round Bale', blurb: 'rolled tight and wrapped in plastic: even tougher, still Kaboom-proof',
+  hp: 240, accent: 0xdfe4ea,
+  parts: [...BALE(0x5a5f6a), { min: [-0.97, 0.45, -0.97], max: [0.97, 0.55, 0.97], color: 0xdfe4ea }],
+});
+
 const POSTS = (wire, top) => [
   ...BALE(0x5a5f6a),
   { min: [-0.9, 1.0, -0.9], max: [-0.75, 1.75, -0.75], color: 0x6b4a2f },
@@ -715,7 +832,7 @@ const POSTS = (wire, top) => [
 ];
 
 defineUpgrade({
-  id: 'zap', from: 'haybale2', kind: 'variant', cost: 70,
+  id: 'zap', from: 'haybale3', kind: 'variant', cost: 70,
   name: 'Zappy Fence', blurb: 'electric fence: zaps every walking cow that brushes past. Line your maze with it',
   attack: 'aura', targeting: 'nearest', hitsAir: false, range: 3.2, interval: 0.5, damage: 10, maxHits: 6,
   muzzle: [0, 1.4, 0], shotColor: 0x8fd8ff, shotSound: 'zap', accent: 0x8fd8ff,
@@ -738,7 +855,7 @@ const GOO = (soak, drip) => [
 ];
 
 defineUpgrade({
-  id: 'goo', from: 'haybale2', kind: 'variant', cost: 50,
+  id: 'goo', from: 'haybale3', kind: 'variant', cost: 50,
   name: 'Molasses Bale', blurb: 'sticky sweet trap: every walking cow nearby moves at half speed',
   attack: 'aura', targeting: 'nearest', hitsAir: false, range: 3.6, interval: 0.25, slow: 0.5, slowTime: 0.5,
   muzzle: [0, 1.1, 0], accent: 0xc8742a,
@@ -1081,3 +1198,213 @@ defineUpgrade({
   bountyMult: 1.65, range: 15, interest: 0.1, interestCap: 150, accent: 0xffb000,
   parts: VAULT(0x3a3f50, 0xc9a227, 0xffffff),
 });
+
+// ---- Late game: Lv6 to Lv10 ----------------------------------------------
+// Every variant runs to Lv6, then forks again at Lv7 into two sub-variants,
+// each with three more buff levels to Lv10 (TDK-style "pick, pick again").
+// Lv8–10 add bronze, silver and gold corner studs; a Lv7 fork flies its flag.
+
+const STUDS = [0xcd7f32, 0xdfe4ea, 0xffd84d];
+/** Lv8+ trim: four studs at the footprint corners, one ring further in per level. */
+function studs(fp, n) {
+  const h = fp - 0.14 - 0.22 * n, top = 0.3 + 0.12 * n;
+  return [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => ({ min: [sx * h - 0.09, 0, sz * h - 0.09], max: [sx * h + 0.09, top, sz * h + 0.09], color: STUDS[n] }));
+}
+/** Lv7 fork: a pennant on a pole at the back-left corner. */
+function flag(fp, color, h = 2.6) {
+  const x = -fp + 0.15, z = fp - 0.15;
+  return [
+    { min: [x - 0.05, 0, z - 0.05], max: [x + 0.05, h, z + 0.05], color: 0x6b4a2f },
+    { min: [x + 0.05, h - 0.5, z - 0.02], max: [x + 0.65, h - 0.1, z + 0.02], color },
+  ];
+}
+/**
+ * A line of upgrades from `from`: the first step may be a 'variant' (a fork),
+ * the rest are buffs; steps marked `studs` get the next stud ring.
+ */
+function path(from, steps) {
+  let prev = from, n = 0;
+  for (const s of steps) {
+    const { studs: stud, flag: fl, ...rest } = s;
+    const fp = TOWER_FORMS[prev].footprint;
+    const add = [...(rest.addParts ?? []), ...(fl ? flag(fp, fl) : []), ...(stud ? studs(fp, n++) : [])];
+    defineUpgrade({ kind: 'buff', from: prev, ...rest, ...(add.length ? { addParts: add } : {}) });
+    prev = s.id;
+  }
+}
+
+// Squirter · Moo-chine Gun
+path('gatling2', [{ id: 'gatling3', cost: 420, name: 'Bovine Buzzsaw', blurb: 'barrels spin so fast they hum the national anthem', damage: 11, minInterval: 0.028, range: 17, accent: 0xff3a3a }]);
+path('gatling3', [
+  { id: 'chocogat', kind: 'variant', cost: 600, flag: 0x6a3a1a, name: 'Chocolate Thunder', blurb: 'chocolate milk arcs from cow to cow: each shot jumps to 2 more', damage: 12, chain: { jumps: 2, range: 5, falloff: 0.6 }, shotColor: 0x8a5a32, accent: 0x8a5a32 },
+  { id: 'chocogat2', cost: 750, studs: true, name: 'Double Fudge Thunder', blurb: 'thicker fudge, one more jump', damage: 14, chain: { jumps: 3, range: 5, falloff: 0.6 } },
+  { id: 'chocogat3', cost: 950, studs: true, name: 'Hot Fudge Hurricane', blurb: 'the fudge jumps further and loses less on the way', damage: 16, chain: { jumps: 3, range: 6, falloff: 0.65 } },
+  { id: 'chocogat4', cost: 1300, studs: true, name: 'Death by Chocolate', blurb: 'four jumps of molten cocoa. The herd never stood a chance', damage: 19, minInterval: 0.025, chain: { jumps: 4, range: 6.5, falloff: 0.7 }, accent: 0x5a2a10 },
+]);
+path('gatling3', [
+  { id: 'strawgat', kind: 'variant', cost: 580, flag: 0xff8ab4, name: 'Strawberry Shredder', blurb: 'pink milk marks every cow it hits: marked cows take +15% from everything', damage: 13, mark: { vuln: 1.15, time: 2 }, shotColor: 0xff8ab4, accent: 0xff8ab4 },
+  { id: 'strawgat2', cost: 720, studs: true, name: 'Strawberry Swirl Shredder', blurb: 'stickier pink: +20% marks', damage: 15, mark: { vuln: 1.2, time: 2 } },
+  { id: 'strawgat3', cost: 920, studs: true, name: 'Berry Blaster 9000', blurb: 'over nine thousand berries per minute', damage: 17, range: 18, mark: { vuln: 1.25, time: 2.5 } },
+  { id: 'strawgat4', cost: 1250, studs: true, name: 'Neapolitan Nightmare', blurb: 'three flavours of doom: +30% marks, faster spin', damage: 20, minInterval: 0.025, mark: { vuln: 1.3, time: 2.5 }, accent: 0xff5a9a },
+]);
+
+// Squirter · Moo-shotgun
+path('shotgun2', [{ id: 'shotgun3', cost: 380, name: 'Cream Cannonade', blurb: 'heavy cream pellets: more of them, harder', damage: 44, interval: 0.46, range: 12.5, maxHits: 14 }]);
+path('shotgun3', [
+  { id: 'buckshot', kind: 'variant', cost: 520, flag: 0xf4f4e0, name: 'Cottage Cheese Buckshot', blurb: 'lumpy curds: every 3rd blast curdles the herd solid for 0.6 s', damage: 46, stunEvery: 3, stunTime: 0.6, shotColor: 0xf4f4e0, accent: 0xe8e8c8 },
+  { id: 'buckshot2', cost: 680, studs: true, name: 'Extra Lumpy Buckshot', blurb: 'lumpier, longer curdles, more cows', damage: 52, stunTime: 0.7, maxHits: 16 },
+  { id: 'buckshot3', cost: 880, studs: true, name: 'Curdle Cannon', blurb: 'every other blast curdles', damage: 60, stunEvery: 2, stunTime: 0.7 },
+  { id: 'buckshot4', cost: 1200, studs: true, name: 'The Big Curdle', blurb: 'a wall of cottage cheese: 20 cows frozen in their tracks', damage: 70, stunTime: 0.9, maxHits: 20, spreadCos: 0.66 },
+]);
+path('shotgun3', [
+  { id: 'eggnog', kind: 'variant', cost: 540, flag: 0xffe6a0, name: 'Eggnog Blunderbuss', blurb: 'flaming eggnog pellets set the whole cone alight', damage: 42, burn: { dps: 10, time: 3 }, shotColor: 0xffd890, accent: 0xffc860 },
+  { id: 'eggnog2', cost: 700, studs: true, name: 'Spiked Eggnog', blurb: 'something extra in the nog: hotter burns', damage: 48, burn: { dps: 14, time: 3.5 } },
+  { id: 'eggnog3', cost: 900, studs: true, name: 'Yule Log Launcher', blurb: 'burning cows that drop light up their friends', damage: 54, burn: { dps: 18, time: 4, spread: 2 } },
+  { id: 'eggnog4', cost: 1250, studs: true, name: 'Krampus Nog', blurb: 'naughty list only: huge burns that leap between cows', damage: 62, maxHits: 18, burn: { dps: 26, time: 4.5, spread: 3 }, accent: 0xd04848 },
+]);
+
+// Butter Mortar · Butter Slick Lobber
+path('slick2', [{ id: 'slick3', cost: 400, name: 'Ghee Geyser', blurb: 'clarified butter: hotter, wider, longer slicks', damage: 70, interval: 1.7, range: 34, slick: { radius: 3.8, time: 4.5, dps: 11, slow: 0.45 } }]);
+path('slick3', [
+  { id: 'cluster', kind: 'variant', cost: 560, flag: 0xfff2a0, name: 'Butter Pat Cluster', blurb: 'each shell bursts into 4 butter pats that splat around it', damage: 72, cluster: { count: 4, spread: 3.2, damage: 0.5, radius: 0.6 }, accent: 0xfff2a0 },
+  { id: 'cluster2', cost: 720, studs: true, name: 'Pat-a-Pat Barrage', blurb: 'five pats per shell', damage: 80, cluster: { count: 5, spread: 3.2, damage: 0.5, radius: 0.6 } },
+  { id: 'cluster3', cost: 920, studs: true, name: 'Carpet Buttering', blurb: 'six pats, spread wider, fired faster', damage: 90, interval: 1.6, cluster: { count: 6, spread: 3.6, damage: 0.5, radius: 0.6 } },
+  { id: 'cluster4', cost: 1300, studs: true, name: 'Butterpocalypse', blurb: 'eight pats. There is no toast big enough', damage: 105, interval: 1.5, cluster: { count: 8, spread: 4, damage: 0.6, radius: 0.6 }, accent: 0xffd84d },
+]);
+path('slick3', [
+  { id: 'yogurt', kind: 'variant', cost: 540, flag: 0xd8f4ff, name: 'Frozen Yogurt Lobber', blurb: 'fro-yo shells: no puddle, but every cow splashed is slowed and brittle (+20% dmg)', damage: 64, splashRadius: 4.6, slick: null, chill: { time: 2, slow: 0.5, vuln: 1.2 }, shotColor: 0xe8f8ff, accent: 0x9ae0ff },
+  { id: 'yogurt2', cost: 700, studs: true, name: 'Fro-Yo Flurry', blurb: 'colder and faster', damage: 72, interval: 1.6, chill: { time: 2.5, slow: 0.45, vuln: 1.25 } },
+  { id: 'yogurt3', cost: 900, studs: true, name: 'Greek Glacier', blurb: 'thick, tangy and very cold', damage: 82, splashRadius: 5, chill: { time: 3, slow: 0.4, vuln: 1.3 } },
+  { id: 'yogurt4', cost: 1250, studs: true, name: 'Absolute Zero Yogurt', blurb: '−273 °C with sprinkles', damage: 95, interval: 1.4, splashRadius: 5.5, chill: { time: 3.5, slow: 0.3, vuln: 1.4 }, accent: 0x5ab4ff },
+]);
+
+// Butter Mortar · Popcorn Flak
+path('flak2', [{ id: 'flak3', cost: 380, name: 'Caramel Corn Barrage', blurb: 'sticky caramel airbursts, faster', damage: 72, interval: 0.36, splashRadius: 3.6, range: 29 }]);
+path('flak3', [
+  { id: 'jiffy', kind: 'variant', cost: 540, flag: 0xc0c8d0, name: 'Jiffy Pop Cluster', blurb: 'each burst pops 3 more kernels around it', damage: 76, cluster: { count: 3, spread: 2.5, damage: 0.5, radius: 0.7 }, accent: 0xc0c8d0 },
+  { id: 'jiffy2', cost: 700, studs: true, name: 'Family Size Jiffy', blurb: 'four extra kernels', damage: 84, cluster: { count: 4, spread: 2.5, damage: 0.5, radius: 0.7 } },
+  { id: 'jiffy3', cost: 900, studs: true, name: 'Popping Frenzy', blurb: 'five kernels, faster', damage: 94, interval: 0.33, cluster: { count: 5, spread: 2.8, damage: 0.5, radius: 0.7 } },
+  { id: 'jiffy4', cost: 1250, studs: true, name: 'Kernel Panic', blurb: 'the sky is 40% popcorn now', damage: 108, interval: 0.3, cluster: { count: 6, spread: 3, damage: 0.55, radius: 0.7 } },
+]);
+path('flak3', [
+  { id: 'xbutter', kind: 'variant', cost: 520, flag: 0xffe14d, name: 'Extra Butter Flak', blurb: 'buttery bursts mark cows: +20% damage from everything, and walkers take more', damage: 78, groundFactor: 0.7, mark: { vuln: 1.2, time: 2.5 }, shotColor: 0xffe680, accent: 0xffe14d },
+  { id: 'xbutter2', cost: 680, studs: true, name: 'Movie Theatre Butter', blurb: 'the good stuff from the pump', damage: 86, mark: { vuln: 1.25, time: 2.5 } },
+  { id: 'xbutter3', cost: 880, studs: true, name: 'IMAX Butter', blurb: 'bigger bursts, longer reach', damage: 96, splashRadius: 4.2, range: 31, mark: { vuln: 1.3, time: 2.5 } },
+  { id: 'xbutter4', cost: 1200, studs: true, name: "Director's Cut", blurb: 'three hours of butter, no intermission', damage: 110, interval: 0.32, groundFactor: 0.8, mark: { vuln: 1.35, time: 3 } },
+]);
+
+// Hay Bale · Zappy Fence
+path('zap2', [{ id: 'zap3', cost: 160, name: 'Tesla Bale', blurb: 'coils in the hay: bigger, faster zaps', damage: 20, range: 4.2, maxHits: 12, interval: 0.36 }]);
+path('zap3', [
+  { id: 'static', kind: 'variant', cost: 240, flag: 0xfff4a0, name: 'Static Cling Bale', blurb: 'every 4th pulse sticks cows to the fence for 0.5 s', damage: 22, stunEvery: 4, stunTime: 0.5, accent: 0xfff4a0 },
+  { id: 'static2', cost: 320, studs: true, name: 'Sock-Drawer Static', blurb: 'longer clings, harder zaps', damage: 26, stunTime: 0.6 },
+  { id: 'static3', cost: 420, studs: true, name: 'Wool Sweater Bale', blurb: 'every 3rd pulse clings', damage: 30, range: 4.6, stunEvery: 3 },
+  { id: 'static4', cost: 580, studs: true, name: 'Ball Lightning Bale', blurb: 'a crackling sphere of hay and hate', damage: 36, range: 5, maxHits: 16, stunTime: 0.8 },
+]);
+path('zap3', [
+  { id: 'rod', kind: 'variant', cost: 260, flag: 0x8fd8ff, name: 'Lightning Rod', blurb: 'a bolt at the lead cow that forks to 4 more', attack: 'hitscan', targeting: 'first', range: 9, interval: 0.6, damage: 30, chain: { jumps: 4, range: 4.5, falloff: 0.8 }, muzzle: [0, 3.0, 0],
+    addParts: [{ min: [-0.06, 1.0, -0.06], max: [0.06, 3.0, 0.06], color: 0xb9c0cc }], accent: 0x8fd8ff },
+  { id: 'rod2', cost: 340, studs: true, name: 'Forked Lightning Rod', blurb: 'five forks', damage: 36, chain: { jumps: 5, range: 4.5, falloff: 0.8 } },
+  { id: 'rod3', cost: 450, studs: true, name: 'Storm Chaser Bale', blurb: 'six forks, longer reach', damage: 44, range: 10, chain: { jumps: 6, range: 4.5, falloff: 0.8 } },
+  { id: 'rod4', cost: 620, studs: true, name: "Zeus's Hay Fork", blurb: 'eight forks from the heavens', damage: 54, range: 11, interval: 0.5, chain: { jumps: 8, range: 5, falloff: 0.85 }, accent: 0xffe14d },
+]);
+
+// Hay Bale · Molasses Bale
+path('goo2', [{ id: 'goo3', cost: 140, name: 'Maple Mire', blurb: 'Canadian-grade stickiness, wider', range: 5, slow: 0.32 }]);
+path('goo3', [
+  { id: 'tar', kind: 'variant', cost: 220, flag: 0x2c2f3a, name: 'Hot Tar Bale', blurb: 'bubbling tar: slows less, but burns every cow stuck in it', slow: 0.4, range: 4.6, burn: { dps: 6, time: 1 }, accent: 0x50566a },
+  { id: 'tar2', cost: 300, studs: true, name: 'Boiling Tar Bale', blurb: 'hotter tar', burn: { dps: 9, time: 1 } },
+  { id: 'tar3', cost: 400, studs: true, name: 'Asphalt Bale', blurb: 'road works, cows lose', range: 5, burn: { dps: 12, time: 1 } },
+  { id: 'tar4', cost: 560, studs: true, name: 'La Brea Bale', blurb: 'where mammoths went to die. Cows too', range: 5.4, slow: 0.35, burn: { dps: 16, time: 1.2 } },
+]);
+path('goo3', [
+  { id: 'scarecrow', kind: 'variant', cost: 260, flag: 0xd04848, name: 'Scarecrow Bale', blurb: 'still sticky, and towers within 7 m fire 15% faster (it scares them into working)', slow: 0.5, range: 3.6, boost: { range: 7, rate: 0.15 },
+    addParts: [{ min: [-0.08, 1.0, -0.08], max: [0.08, 2.4, 0.08], color: 0x6b4a2f }, { min: [-0.7, 1.9, -0.06], max: [0.7, 2.0, 0.06], color: 0x6b4a2f }, { min: [-0.22, 2.4, -0.22], max: [0.22, 2.8, 0.22], color: 0xe2c25a }, { min: [-0.3, 2.8, -0.3], max: [0.3, 2.9, 0.3], color: 0x8a5a32 }], accent: 0xd04848 },
+  { id: 'scarecrow2', cost: 340, studs: true, name: 'Spooky Scarecrow', blurb: '+20% fire rate nearby', boost: { range: 7, rate: 0.2 } },
+  { id: 'scarecrow3', cost: 440, studs: true, name: 'Haunted Scarecrow', blurb: '+25% fire rate, wider', boost: { range: 8, rate: 0.25 } },
+  { id: 'scarecrow4', cost: 600, studs: true, name: 'Scarecrow Supreme', blurb: 'the crows salute it: +30% fire rate in 9 m', boost: { range: 9, rate: 0.3 } },
+]);
+
+// Milk Frother · Crème Brûlée Torch (already at Lv6)
+path('brulee3', [
+  { id: 'chili', kind: 'variant', cost: 520, flag: 0xff3a1a, name: 'Ghost Pepper Latte', blurb: 'scalding chili milk: enormous burns that leap 4.5 m', damage: 8.5, range: 10, burn: { dps: 50, time: 5, spread: 4.5 }, shotColor: 0xff4a1a, accent: 0xff3a1a },
+  { id: 'chili2', cost: 680, studs: true, name: 'Carolina Reaper Roast', blurb: 'hotter. Much hotter', burn: { dps: 62, time: 5, spread: 4.5 } },
+  { id: 'chili3', cost: 880, studs: true, name: "Dragon's Breath Mocha", blurb: 'longer reach, wider leaps', range: 11, burn: { dps: 76, time: 5, spread: 5 } },
+  { id: 'chili4', cost: 1200, studs: true, name: 'Sun Surface Espresso', blurb: '5,500 °C, extra foam', damage: 11, maxHits: 14, burn: { dps: 95, time: 6, spread: 5.5 } },
+]);
+path('brulee3', [
+  { id: 'volcano', kind: 'variant', cost: 540, flag: 0xff8a1a, name: 'Lava Latte', blurb: 'every 8th squirt leaves a puddle of molten latte under the lead cow', damage: 8, slick: { radius: 3, time: 3, dps: 20, slow: 0.7 }, slickEvery: 8, shotColor: 0xff8a1a, accent: 0xff8a1a },
+  { id: 'volcano2', cost: 700, studs: true, name: 'Magma Macchiato', blurb: 'bigger, hotter puddles', slick: { radius: 3.3, time: 3, dps: 26, slow: 0.7 } },
+  { id: 'volcano3', cost: 900, studs: true, name: 'Pyroclastic Frappé', blurb: 'a puddle every 6th squirt', slick: { radius: 3.6, time: 3, dps: 32, slow: 0.65 }, slickEvery: 6 },
+  { id: 'volcano4', cost: 1250, studs: true, name: 'Mount Vesu-moo-ius', blurb: 'the lane is now the floor is lava', slick: { radius: 4, time: 4, dps: 42, slow: 0.6 }, slickEvery: 5 },
+]);
+
+// Milk Frother · Soft-Serve Blaster (already at Lv6)
+path('softserve3', [
+  { id: 'shake', kind: 'variant', cost: 500, flag: 0xffd0e4, name: 'Thick Shake Cannon', blurb: 'so thick cows get stuck: every 12th squirt freezes them solid for 0.8 s', damage: 6.4, stunEvery: 12, stunTime: 0.8, accent: 0xffb0d0 },
+  { id: 'shake2', cost: 660, studs: true, name: 'Double Thick Shake', blurb: 'longer freezes', damage: 7.2, stunTime: 0.9 },
+  { id: 'shake3', cost: 860, studs: true, name: 'Concrete Shake', blurb: 'turn it upside down, it stays in: freezes every 10th squirt', damage: 8.2, stunEvery: 10 },
+  { id: 'shake4', cost: 1150, studs: true, name: 'Brain Freeze Supreme', blurb: 'the whole herd gets an ice-cream headache', damage: 9.5, stunEvery: 8, stunTime: 1 },
+]);
+path('softserve3', [
+  { id: 'sundae', kind: 'variant', cost: 480, flag: 0xff5a7a, name: 'Sprinkle Sundae Sprayer', blurb: 'sprinkles make cows extra brittle (+55% dmg) but slow them less, over a longer reach', damage: 5, range: 12, maxHits: 16, chill: { time: 3, slow: 0.5, vuln: 1.55 }, accent: 0xff5a7a },
+  { id: 'sundae2', cost: 640, studs: true, name: 'Hot Fudge Sundae', blurb: '+60% brittle', chill: { time: 3, slow: 0.5, vuln: 1.6 } },
+  { id: 'sundae3', cost: 840, studs: true, name: 'Kitchen Sink Sundae', blurb: 'everything on it, more cows', range: 13, maxHits: 18, chill: { time: 3, slow: 0.5, vuln: 1.65 } },
+  { id: 'sundae4', cost: 1100, studs: true, name: 'Banana Split Supreme', blurb: '+75% brittle, 22 cows per jet', maxHits: 22, chill: { time: 3.5, slow: 0.5, vuln: 1.75 } },
+]);
+
+// Hayloft Sniper · Cheddar Railgun (already at Lv6)
+path('rail3', [
+  { id: 'plasma', kind: 'variant', cost: 650, flag: 0xff6a1a, name: 'Plasma Parmesan', blurb: 'white-hot cheese slugs set every cow in the line on fire', damage: 280, burn: { dps: 30, time: 3 }, shotColor: 0xffa040, accent: 0xff6a1a },
+  { id: 'plasma2', cost: 820, studs: true, name: 'Molten Mozzarella', blurb: 'stretchier, hotter', damage: 320, burn: { dps: 40, time: 3 } },
+  { id: 'plasma3', cost: 1050, studs: true, name: 'Raclette Ray', blurb: 'faster shots, bigger burns', damage: 370, interval: 1.7, burn: { dps: 52, time: 3 } },
+  { id: 'plasma4', cost: 1450, studs: true, name: 'Fondue Death Ray', blurb: 'dip the whole herd', damage: 430, beamWidth: 1.2, burn: { dps: 70, time: 4 } },
+]);
+path('rail3', [
+  { id: 'grated', kind: 'variant', cost: 620, flag: 0xfff2b0, name: 'Grated Parmesan Rail', blurb: 'a wide spray of grated cheese: marks the whole line (+20% dmg from everything)', damage: 260, beamWidth: 1.4, mark: { vuln: 1.2, time: 3 }, accent: 0xfff2b0 },
+  { id: 'grated2', cost: 800, studs: true, name: 'Finely Grated Rail', blurb: 'wider, stickier', damage: 300, beamWidth: 1.6, mark: { vuln: 1.25, time: 3 } },
+  { id: 'grated3', cost: 1000, studs: true, name: 'Microplane Cannon', blurb: '24 cows per slug', damage: 340, maxHits: 24, mark: { vuln: 1.3, time: 3 } },
+  { id: 'grated4', cost: 1400, studs: true, name: 'Cheese Grater of the Gods', blurb: 'a 4 m wide blizzard of parmesan', damage: 400, beamWidth: 2, mark: { vuln: 1.35, time: 4 } },
+]);
+
+// Hayloft Sniper · Udder Assassin (already at Lv6)
+path('assassin3', [
+  { id: 'tranq', kind: 'variant', cost: 600, flag: 0x9ae0ff, name: 'Tranquilizer Moo-ser', blurb: 'every dart puts its cow to sleep for 1.2 s (bosses barely notice)', damage: 320, stunEvery: 1, stunTime: 1.2, shotColor: 0x9ae0ff, accent: 0x9ae0ff },
+  { id: 'tranq2', cost: 780, studs: true, name: 'Warm Milk Darts', blurb: 'longer naps', damage: 360, stunTime: 1.5 },
+  { id: 'tranq3', cost: 1000, studs: true, name: 'Bedtime Story Rifle', blurb: 'faster darts, deeper sleep', damage: 410, interval: 1.0, stunTime: 1.8 },
+  { id: 'tranq4', cost: 1400, studs: true, name: 'Lullaby Moo-n', blurb: 'hush little cowbaby', damage: 480, interval: 0.9, stunTime: 2.2 },
+]);
+path('assassin3', [
+  { id: 'bounty', kind: 'variant', cost: 580, flag: 0xc9a227, name: 'Bounty Hunter', blurb: 'every cow it drops pays double', damage: 320, ownBounty: 2, accent: 0xc9a227 },
+  { id: 'bounty2', cost: 750, studs: true, name: 'Wanted Poster Sniper', blurb: '×2.3 on its own kills', damage: 360, ownBounty: 2.3 },
+  { id: 'bounty3', cost: 960, studs: true, name: 'Sheriff of Moo-ttingham', blurb: '×2.6, executes under 35%', damage: 400, ownBounty: 2.6, execute: 0.35 },
+  { id: 'bounty4', cost: 1350, studs: true, name: 'Wanted: Dead or Alive', blurb: '×3 moolah and executes under 40%', damage: 460, ownBounty: 3, execute: 0.4 },
+]);
+
+// Auction Barn · Bull Market (already at Lv6)
+path('bullmarket3', [
+  { id: 'tycoon', kind: 'variant', cost: 750, flag: 0x5ad86a, name: 'Cattle Tycoon', blurb: 'top hat, monocle, ×3.1 moolah', bountyMult: 3.1, range: 19, accent: 0x5ad86a },
+  { id: 'tycoon2', cost: 950, studs: true, name: 'Beef Baron', blurb: '×3.4 moolah', bountyMult: 3.4, range: 20 },
+  { id: 'tycoon3', cost: 1200, studs: true, name: 'Dairy Oligarch', blurb: '×3.8 moolah', bountyMult: 3.8, range: 21 },
+  { id: 'tycoon4', cost: 1600, studs: true, name: 'Moo-nopoly Man', blurb: 'passes Go every cow: ×4.3 moolah', bountyMult: 4.3, range: 23 },
+]);
+path('bullmarket3', [
+  { id: 'rodeo', kind: 'variant', cost: 700, flag: 0xd04848, name: 'Rodeo Auction', blurb: 'the auctioneer talks so fast walking cows in reach slow down to listen (25%), ×2.8 moolah', attack: 'aura', targeting: 'nearest', hitsAir: false, interval: 0.25, slow: 0.75, slowTime: 0.5, bountyMult: 2.8, range: 18, accent: 0xd04848 },
+  { id: 'rodeo2', cost: 900, studs: true, name: 'Fast-Talking Auctioneer', blurb: '30% slower cows, ×3 moolah', slow: 0.7, bountyMult: 3 },
+  { id: 'rodeo3', cost: 1150, studs: true, name: 'Hyper-Speed Auctioneer', blurb: '35% slower, ×3.2, wider', slow: 0.65, bountyMult: 3.2, range: 19 },
+  { id: 'rodeo4', cost: 1500, studs: true, name: 'Yodeling Auctioneer', blurb: 'nobody can walk through that: 40% slower, ×3.5', slow: 0.6, bountyMult: 3.5, range: 20 },
+]);
+
+// Auction Barn · Cheese Vault (already at Lv6)
+path('vault3', [
+  { id: 'fondue', kind: 'variant', cost: 650, flag: 0xffe14d, name: 'Fondue Fund', blurb: 'a melting pot of investments: 12% interest, up to 250', interest: 0.12, interestCap: 250, accent: 0xffe14d },
+  { id: 'fondue2', cost: 850, studs: true, name: 'Hedge Fund (Actual Hedge)', blurb: '13% interest, up to 350', interest: 0.13, interestCap: 350 },
+  { id: 'fondue3', cost: 1100, studs: true, name: 'Brie-tirement Plan', blurb: '14% interest, up to 500', interest: 0.14, interestCap: 500 },
+  { id: 'fondue4', cost: 1450, studs: true, name: 'Gouda Sachs', blurb: '15% interest, up to 750', interest: 0.15, interestCap: 750 },
+]);
+path('vault3', [
+  { id: 'printer', kind: 'variant', cost: 600, flag: 0x5ad86a, name: 'Milk Money Printer', blurb: 'prints 60 moolah every wave, saved up or not', income: 60, accent: 0x5ad86a },
+  { id: 'printer2', cost: 800, studs: true, name: 'Two-Ply Printer', blurb: '90 moolah every wave', income: 90 },
+  { id: 'printer3', cost: 1050, studs: true, name: 'Quantitative Cheesing', blurb: '130 moolah every wave', income: 130 },
+  { id: 'printer4', cost: 1400, studs: true, name: 'Federal Reserve of Cheese', blurb: '200 moolah every wave. Inflation is a cow problem', income: 200 },
+]);
