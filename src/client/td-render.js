@@ -10,7 +10,7 @@
 // never drawn.
 
 import * as THREE from 'three';
-import { ABILITY_WINDUP, COW_TYPE_LIST } from '../sim/cows.js';
+import { ABILITY_WINDUP, COW_TYPE_LIST, cowHidden } from '../sim/cows.js';
 import { TOWER_FORMS } from '../sim/towers.js';
 import { TowerBatch, EffectPool, boxesGeometry, uploadRange } from './batch.js';
 import { frustumPlanes, sphereVisible, shadowedSphere, composeYXZ } from './cull.js';
@@ -107,6 +107,9 @@ export class TdRenderer {
     this.healGlow = new THREE.Color(0.3, 1, 0.45);
     this.ice = new THREE.Color(0.6, 0.85, 1);
     this.ember = new THREE.Color(1, 0.45, 0.1);
+    this.bubbleGlow = new THREE.Color(0.75, 0.95, 1);
+    this.hasteGlow = new THREE.Color(1, 0.9, 0.35);
+    this.dirt = new THREE.Color(0.35, 0.25, 0.15);
 
     // Towers: every box of every tower in one batched draw; HP bars and cud goo one draw each.
     this.puffGeo = new THREE.SphereGeometry(1, 12, 8);
@@ -221,6 +224,23 @@ export class TdRenderer {
         this.puff(e.x, 0.9, e.z, 1.6, 0xffa8d0);
       } else if (e.kind === 'heal') {
         this.puff(e.x, 0.4, e.z, e.radius * 0.6, 0x7dffa0);
+      } else if (e.kind === 'pop') {
+        this.puff(e.x, 1.0, e.z, 1.0, 0xc8f0ff); // bubble wrap pops
+      } else if (e.kind === 'dodge') {
+        this.puff(e.x, 1.2, e.z, 0.4, 0x5aff8a);
+      } else if (e.kind === 'blink' || e.kind === 'swap') {
+        this.puff(e.x0, 0.9, e.z0, 0.8, 0x9a7aff);
+        this.puff(e.x, 0.9, e.z, 0.8, 0x9a7aff);
+      } else if (e.kind === 'revive') {
+        this.puff(e.x, 1.0, e.z, 1.4, 0xff9a1a);
+      } else if (e.kind === 'mitosis' || e.kind === 'lay') {
+        this.puff(e.x, 0.7, e.z, 0.7, 0x9cf09c);
+      } else if (e.kind === 'emp' || e.kind === 'spikes') {
+        this.puff(e.x, 0.8, e.z, e.radius * 0.7, e.kind === 'emp' ? 0x5ab4ff : 0x5aa84a);
+      } else if (e.kind === 'jam') {
+        this.puff(e.x, 2.0, e.z, 0.6, 0xf0f0ff);
+      } else if (e.kind === 'steal') {
+        this.puff(e.x, 2.0, e.z, 0.8, 0xffc933);
       } else if (e.kind === 'kill') {
         this.puff(e.x, 0.8, e.z, 0.9, 0xffffff);
         // Sold at auction: a little gold coin puff above it.
@@ -391,7 +411,12 @@ export class TdRenderer {
         // Model faces -Z; rotation.y = θ turns -Z to (-sin θ, -cos θ).
         rx = 0; ry = Math.atan2(-c.vx[i], -c.vz[i]); rz = Math.sin(mad ? ph * 2.5 : ph) * rock;
       }
-      const s = s0 * (c.abilityState[i] === ABILITY_WINDUP && type.spitRange > 0 ? 1 + 0.2 * (1 - Math.max(0, c.abilityTime[i]) / type.windup) : 1);
+      let s = s0 * (c.abilityState[i] === ABILITY_WINDUP && type.spitRange > 0 ? 1 + 0.2 * (1 - Math.max(0, c.abilityTime[i]) / type.windup) : 1);
+      // Mole Cow underground: only a hump of back shows above the dirt.
+      const under = type.burrow && cowHidden(type, c.id[i], this.game.time, true);
+      if (under) y -= 0.85 * s0;
+      const faded = !under && type.phase && cowHidden(type, c.id[i], this.game.time);
+      if (c.shieldHp[i] > 0) s *= 1.06; // puffed up in bubble wrap
       composeYXZ(mat, n * 16, x, y, z, rx, ry, rz, s);
       if (type.altitude > 0 && wings + 2 <= maxWings) {
         const cm = this.cowMatrix.fromArray(mat, n * 16);
@@ -412,6 +437,11 @@ export class TdRenderer {
       else if (c.slowTime[i] > 0) col.lerp(this.goo, 0.45); // stuck in molasses / butter / glue
       if (c.burnTime[i] > 0) col.lerp(this.ember, 0.35 + 0.25 * Math.sin(this.time * 18 + c.id[i] * 3.1)); // simmering
       if (c.abilityState[i] === ABILITY_WINDUP && type.spitRange > 0) col.lerp(this.spitGlow, 0.5 + 0.3 * Math.sin(this.time * 20));
+      if (c.shieldHp[i] > 0) col.lerp(this.bubbleGlow, 0.45);
+      if (c.hasteT[i] > 0) col.lerp(this.hasteGlow, 0.3 + 0.2 * Math.sin(this.time * 16 + c.id[i]));
+      if (type.taunt) col.lerp(this.rage, 0.25 + 0.25 * Math.sin(this.time * 10)); // HEY, OVER HERE
+      if (under) col.lerp(this.dirt, 0.7);
+      if (faded) col.multiplyScalar(0.2); // a chameleon blending in
       col.lerp(this.flash, 1 - Math.min(1, c.hitAge[i] / 0.12));
       colArr[n * 3] = col.r; colArr[n * 3 + 1] = col.g; colArr[n * 3 + 2] = col.b;
       n++;

@@ -28,12 +28,16 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
   assert(waveMix(1).length === 1 && waveMix(2).length === 1 && waveMix(1)[0].type === COW_TYPES.cow, 'early waves not plain');
   // Weight-0 types (Cash Cow, Big Bessie, Calf) are surprise-only and never in a mix.
   const waveTypes = COW_TYPE_LIST.filter((t) => t.weight > 0).length;
-  assert(waveTypes === 12 && waveMix(13).length === waveTypes, 'wave 13 should have every wave type');
-  assert(waveMix(6).length === 5 && waveMix(10).length === 9, 'one new type per wave from 7 to 11');
+  assert(waveTypes === 66 && waveMix(30).length === waveTypes, `wave 30 should have every wave type (${waveTypes} types)`);
   assert(cowDebuts(1).length === 0, 'wave 1 announces the plain cow');
-  const debuted = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].flatMap((w) => cowDebuts(w).map((t) => t.id)).sort().join();
-  assert(debuted === 'big,boomer,bull,fast,flying,mama,ninja,ram,spitter,tin,vet', `debuts: ${debuted}`);
-  for (let w = 3; w <= 13; w++) assert(cowDebuts(w).length === 1, `wave ${w}: ${cowDebuts(w).length} debuts`);
+  // The first 12 still debut one per wave from 3 to 13, alongside the big herd.
+  const debuted = new Set([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].flatMap((w) => cowDebuts(w).map((t) => t.id)));
+  for (const id of 'big,boomer,bull,fast,flying,mama,ninja,ram,spitter,tin,vet'.split(',')) assert(debuted.has(id), `${id} never debuts`);
+  // Something new walks in every wave from 3 to 28, never more than 4 at once.
+  for (let w = 3; w <= 28; w++) assert(cowDebuts(w).length >= 1 && cowDebuts(w).length <= 4, `wave ${w}: ${cowDebuts(w).length} debuts`);
+  // The plain cow stays the most common one.
+  const late = waveMix(30), cowW = late.find((m) => m.type.id === 'cow').weight;
+  assert(late.every((m) => m.weight <= cowW), 'something outweighs the plain cow');
   const mix = waveMix(13);
   const counts = new Map();
   for (let k = 0; k < 1000; k++) {
@@ -47,7 +51,7 @@ test('cows: wave mix starts plain and adds a new type every few waves', () => {
   }
 });
 
-test('cows: spawners use the mix (wave 1 plain, wave 11 everything) with per-wave HP', () => {
+test('cows: spawners use the mix (wave 1 plain, wave 11 a big mixed herd) with per-wave HP', () => {
   // Surprises off: this checks the wave formula alone (surprises.test.js covers them).
   const g = fieldGame({ waveBase: 40, waveGrowth: 0, milk: 1e9, surprises: false, bossEvery: 0 });
   const seen = [];
@@ -58,7 +62,8 @@ test('cows: spawners use the mix (wave 1 plain, wave 11 everything) with per-wav
   const w1 = seen.filter((s) => s.wave === 1);
   assert(w1.length === 40 && w1.every((s) => s.id === 'cow' && s.hp === COW_TYPES.cow.hp), 'wave 1 not 40 plain cows');
   const w11 = new Set(seen.filter((s) => s.wave === 11).map((s) => s.id));
-  assert(w11.size === COW_TYPE_LIST.filter((t) => t.weight > 0 && t.firstWave <= 11).length, `wave 11 types: ${[...w11]}`);
+  const allowed = COW_TYPE_LIST.filter((t) => t.weight > 0 && t.firstWave <= 11).map((t) => t.id);
+  assert([...w11].every((id) => allowed.includes(id)) && w11.size >= 0.7 * allowed.length, `wave 11 types: ${[...w11]} of ${allowed}`);
   const big11 = seen.find((s) => s.wave === 11 && s.id === 'big');
   assert(Math.abs(big11.hp - COW_TYPES.big.hp * (1 + 0.15 * 10)) < 1e-9, `big cow hp ${big11.hp}`);
 });
