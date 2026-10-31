@@ -456,7 +456,8 @@ function startGame({ map, seed = newSeed(), session = null }) {
     if (game.wave !== announcedWave) {
       announcedWave = game.wave;
       const debuts = cowDebuts(game.wave);
-      if (debuts.length) say(`New cows this wave: ${debuts.map((t) => t.name).join(', ')}!`, 3500);
+      if (debuts.length === 1 && debuts[0].blurb) say(`New cow: ${debuts[0].name}! ${debuts[0].blurb}`, 4500);
+      else if (debuts.length) say(`New cows this wave: ${debuts.map((t) => t.name).join(', ')}!`, 3500 + 700 * debuts.length);
     }
 
     const eye = player.interpolatedEye(clock.alpha);

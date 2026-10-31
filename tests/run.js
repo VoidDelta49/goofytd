@@ -12,6 +12,7 @@ import './retaliation.test.js';
 import './bosses.test.js';
 import './newtowers.test.js';
 import './latetowers.test.js';
+import './herd.test.js';
 import './coop.test.js';
 import './discovery.test.js';
 import './cull.test.js';

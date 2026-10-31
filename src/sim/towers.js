@@ -10,7 +10,7 @@
 // Pure: no three.js, no DOM. Functions get (game, tower, ...) so they can
 // use the game's grid, cows, RNG and event list.
 
-import { COW_TYPE_LIST, MAX_COW_RADIUS } from './cows.js';
+import { COW_TYPE_LIST, MAX_COW_RADIUS, cowHidden } from './cows.js';
 
 /**
  * Targeting strategies: (game, tower) -> cow slot or -1. Only cows within
@@ -29,6 +29,9 @@ export const TARGETING = {
 
 /** Height (m) of a cow's middle, for tracers. */
 export function cowAimY(type) { return type.altitude + 0.9 * type.scale; }
+
+/** Added to a taunting cow's score: it outranks every other cow in range. */
+const TAUNT = 1e12;
 
 function dist2(cows, i, x, z) {
   const dx = cows.x[i] - x, dz = cows.z[i] - z;
@@ -60,7 +63,8 @@ function pick(game, t, score) {
         const d2 = dist2(cows, i, t.x, t.z);
         if (d2 > r2 || d2 < m2) continue;
         if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue; // Ninja Cow: unseen until it's close (scopes see it)
-        const s = score(i);
+        if ((type.burrow || type.phase) && cowHidden(type, cows.id[i], game.time)) continue; // Mole underground, Chameleon faded out
+        const s = type.taunt ? score(i) + TAUNT : score(i); // Rodeo Clown: HEY, OVER HERE
         if (s > bestScore || (s === bestScore && best >= 0 && i < best)) { bestScore = s; best = i; }
       }
     }
@@ -81,7 +85,8 @@ export function pickBruteForce(game, t, score) {
     const d2 = dist2(cows, i, t.x, t.z);
     if (d2 > r2 || d2 < m2) continue;
     if (type.camo > 0 && !def.seesCamo && d2 > type.camo * type.camo) continue;
-    const s = score(i);
+    if ((type.burrow || type.phase) && cowHidden(type, cows.id[i], game.time)) continue;
+    const s = type.taunt ? score(i) + TAUNT : score(i);
     if (s > bestScore) { bestScore = s; best = i; }
   }
   return best;
@@ -142,6 +147,7 @@ function chainHit(game, t, i) {
       if (hitScratch.includes(k)) continue;
       const type = COW_TYPE_LIST[cows.type[k]];
       if (type.friendly || (!def.hitsAir && type.altitude > 0)) continue;
+      if ((type.burrow || type.phase) && cowHidden(type, cows.id[k], game.time)) continue;
       const d2 = dist2(cows, k, lx, lz);
       if (d2 <= r2 && d2 < bestD) { bestD = d2; best = k; } // ascending slots: ties keep the lower one
     }
